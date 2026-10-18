@@ -140,7 +140,7 @@ private struct RosettaBanner: View {
 
 struct RuntimeMissingView: View {
     @Environment(AppModel.self) private var model
-    private let brew = "brew install --cask gcenx/wine/wine-crossover"
+    private let brew = "brew install --cask gcenx/wine/game-porting-toolkit"
 
     var body: some View {
         ContentUnavailableView {
@@ -148,9 +148,9 @@ struct RuntimeMissingView: View {
         } description: {
             VStack(alignment: .leading, spacing: 8) {
                 Text("O Vinho precisa de um build do Wine. Opções:")
-                Text("• Instale um build open source da CodeWeavers via Homebrew:")
+                Text("• Para jogos (D3DMetal), instale o Game Porting Toolkit via Homebrew:")
                 Text(brew).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                Text("• Ou coloque um runtime em ~/Library/Application Support/Vinho/Runtimes/<nome>/ (com bin/wine).")
+                Text("• Para apps em geral, rode scripts/install-runtime.sh no projeto (Wine 11), ou coloque um runtime em ~/Library/Application Support/Vinho/Runtimes/<nome>/.")
             }
             .frame(maxWidth: 520, alignment: .leading)
         } actions: {

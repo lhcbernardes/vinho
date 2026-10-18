@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Locais padrão (em ordem):
 /// 1. `~/Library/Application Support/Vinho/Runtimes/<nome>/` — runtimes gerenciados pelo Vinho
-/// 2. `/Applications/Wine*.app` e `~/Applications/Wine*.app` — ex.: Gcenx `Wine Crossover.app`
+/// 2. `/Applications` e `~/Applications`: `Wine*.app` e `Game Porting Toolkit.app` (layout Gcenx)
 public struct RuntimeLocator: Sendable {
     public var searchDirectories: [URL]
 
@@ -38,8 +38,8 @@ public struct RuntimeLocator: Sendable {
             let isAppsFolder = dir.lastPathComponent == "Applications"
             for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 let name = entry.lastPathComponent
-                // Em /Applications só olhamos bundles "Wine*.app" para não varrer tudo.
-                if isAppsFolder && !(name.hasPrefix("Wine") && name.hasSuffix(".app")) { continue }
+                // Em /Applications só olhamos bundles conhecidos para não varrer tudo.
+                if isAppsFolder && !Self.isKnownRuntimeBundle(name) { continue }
 
                 guard let root = Self.resolveRoot(entry) else { continue }
                 let key = root.standardizedFileURL.path
@@ -55,6 +55,12 @@ public struct RuntimeLocator: Sendable {
             }
         }
         return found
+    }
+
+    /// "Wine Stable.app", "Wine Devel.app", "Game Porting Toolkit.app"…
+    static func isKnownRuntimeBundle(_ name: String) -> Bool {
+        guard name.hasSuffix(".app") else { return false }
+        return name.hasPrefix("Wine") || name.contains("Porting Toolkit")
     }
 
     /// Aceita tanto um diretório com `bin/wine` quanto um `.app` com

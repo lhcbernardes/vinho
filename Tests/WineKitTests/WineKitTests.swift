@@ -245,3 +245,12 @@ final class RuntimeLocatorTests: XCTestCase {
         XCTAssertEqual(wine10.capabilities, [.dxmt])
     }
 }
+
+final class RuntimeBundleNameTests: XCTestCase {
+    func testKnownBundles() {
+        XCTAssertTrue(RuntimeLocator.isKnownRuntimeBundle("Wine Devel.app"))
+        XCTAssertTrue(RuntimeLocator.isKnownRuntimeBundle("Game Porting Toolkit.app"))
+        XCTAssertFalse(RuntimeLocator.isKnownRuntimeBundle("Xcode.app"))
+        XCTAssertFalse(RuntimeLocator.isKnownRuntimeBundle("Wine"))
+    }
+}

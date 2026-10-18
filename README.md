@@ -19,13 +19,23 @@ O Vinho não embute o Wine; ele procura runtimes em:
 1. `~/Library/Application Support/Vinho/Runtimes/<nome>/` (precisa ter `bin/wine` ou `bin/wine64`)
 2. `/Applications/Wine*.app` e `~/Applications/Wine*.app` (layout `Contents/Resources/wine`)
 
-Caminho mais rápido — build open source do Wine da CodeWeavers, empacotado pelo Gcenx:
+> Os casks oficiais (`wine-stable`, `wine@devel`, `wine@staging`) foram desativados
+> pelo Homebrew em 01/09/2026, e o `gcenx/wine/wine-crossover` não existe mais.
+
+**Opção A — Wine 11 (apps em geral, gráficos via WineD3D):**
 
 ```bash
-brew install --cask gcenx/wine/wine-crossover
-# se o Gatekeeper bloquear:
-xattr -dr com.apple.quarantine "/Applications/Wine Crossover.app"
+scripts/install-runtime.sh devel 11.16
 ```
+
+**Opção B — Game Porting Toolkit (jogos DX11/DX12 via D3DMetal):**
+
+```bash
+brew install --cask gcenx/wine/game-porting-toolkit
+```
+
+Instala `/Applications/Game Porting Toolkit.app` (o Vinho detecta). O D3DMetal é
+da Apple — uso pessoal/avaliação; não redistribua.
 
 Recursos detectados automaticamente por runtime:
 
