@@ -1,0 +1,7 @@
+# Índice de receitas do Vinho.
+# Aponte o Vinho (Ajustes ▸ Geral ▸ Receitas da comunidade) para a URL "raw"
+# deste arquivo, ex.: https://raw.githubusercontent.com/<você>/vinho/main/community/index.yaml
+recipes:
+  - recipes/7zip.yaml
+  - recipes/notepad-plus-plus.yaml
+  - recipes/steam.yaml

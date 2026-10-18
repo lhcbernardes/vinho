@@ -92,9 +92,12 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] Snapshots de bottle (clone APFS), automáticos antes de instaladores, com restauração
 - [x] Exportar/importar bottle (`.vinhobottle`, tar.gz)
 
-**Fase 4 — Perfis abertos**
-- [ ] Receitas YAML de instalação (dependências winetricks, overrides, env) por app/jogo
-- [ ] Repositório comunitário de receitas + relatório de compatibilidade
+**Fase 4 — Receitas abertas** ✅
+- [x] Receitas YAML (bottle preset, download com SHA-256, run, winetricks, registro, programa principal)
+- [x] Catálogo no app (⇧⌘R) com instalação em bottle novo ou existente, progresso e cancelamento
+- [x] Camadas: embutidas < comunidade (`index.yaml` remoto) < do usuário
+- [x] Pasta `community/` pronta para virar repositório — formato em [`docs/RECEITAS.md`](docs/RECEITAS.md)
+- [ ] Relatórios de compatibilidade ("funcionou?") enviados para o repositório comunitário
 
 Veja também [`docs/ANALISE-CROSSOVER.md`](docs/ANALISE-CROSSOVER.md).
 

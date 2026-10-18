@@ -23,13 +23,22 @@ struct ContentView: View {
                 } description: {
                     Text("Um bottle é um “Windows” isolado onde você instala programas.")
                 } actions: {
-                    Button("Criar Bottle") { model.isCreatingBottle = true }
-                        .buttonStyle(.borderedProminent)
+                    HStack {
+                        Button("Instalar com receita…") { model.isShowingRecipes = true }
+                            .buttonStyle(.borderedProminent)
+                        Button("Criar Bottle vazio") { model.isCreatingBottle = true }
+                    }
                 }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if model.rosettaMissing { RosettaBanner() }
+            VStack(spacing: 0) {
+                if model.rosettaMissing { RosettaBanner() }
+                if let run = model.recipeRun { RecipeProgressBanner(state: run) }
+            }
+        }
+        .sheet(isPresented: $model.isShowingRecipes) {
+            RecipesView()
         }
         .overlay {
             if let message = model.busyMessage {
@@ -83,6 +92,11 @@ private struct BottleSidebar: View {
             }
         }
         .toolbar {
+            ToolbarItem {
+                Button { model.isShowingRecipes = true } label: { Label("Receitas", systemImage: "book") }
+                    .help("Instalar apps e jogos com receitas prontas")
+                    .disabled(model.runtimes.isEmpty)
+            }
             ToolbarItem {
                 Button { model.isCreatingBottle = true } label: { Label("Novo Bottle", systemImage: "plus") }
                     .disabled(model.runtimes.isEmpty)

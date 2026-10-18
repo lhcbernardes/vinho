@@ -1,0 +1,19 @@
+id: notepad-plus-plus
+name: Notepad++
+revision: 1
+category: app
+description: Editor de texto e código leve.
+homepage: https://notepad-plus-plus.org
+bottle:
+  windows: win10
+  graphics: wined3d
+steps:
+  - download:
+      url: https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/v8.9.8.1/npp.8.9.8.1.Installer.x64.exe
+      sha256: 26f3bcced788fadbac4e7e577b430ea2ce6060cf3bcad993ef4612ecd7d743da
+      file: npp-installer.exe
+  - run:
+      file: npp-installer.exe
+      args: ["/S"]
+launch:
+  program: 'C:\Program Files\Notepad++\notepad++.exe'

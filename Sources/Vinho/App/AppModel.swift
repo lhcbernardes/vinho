@@ -4,6 +4,13 @@ import Observation
 import UniformTypeIdentifiers
 import WineKit
 
+struct RecipeRunState: Equatable {
+    var recipeName: String
+    var bottleID: Bottle.ID
+    var step = "Preparando…"
+    var fraction: Double?
+}
+
 struct LogLine: Identifiable, Hashable {
     enum Source { case stdout, stderr, vinho }
     let id = UUID()
@@ -34,6 +41,17 @@ final class AppModel {
     let catalog = Catalog.builtIn
     private var installTasks: [String: Task<Void, Never>] = [:]
 
+    // Receitas
+    var recipes: [RecipeEntry] = []
+    var recipeErrors: [String] = []
+    var recipeRun: RecipeRunState?
+    var isShowingRecipes = false
+    private var recipeTask: Task<Void, Never>?
+
+    var communityIndexURL: String {
+        didSet { UserDefaults.standard.set(communityIndexURL, forKey: "communityIndexURL") }
+    }
+
     var snapshots: [Bottle.ID: [BottleSnapshot]] = [:]
     private let snapshotManager = SnapshotManager()
 
@@ -52,6 +70,7 @@ final class AppModel {
     init() {
         defaultRuntimeID = UserDefaults.standard.string(forKey: "defaultRuntimeID")
         autoSnapshotInstallers = UserDefaults.standard.object(forKey: "autoSnapshotInstallers") as? Bool ?? true
+        communityIndexURL = UserDefaults.standard.string(forKey: "communityIndexURL") ?? ""
     }
 
     // MARK: Derivados
@@ -102,19 +121,18 @@ final class AppModel {
 
     // MARK: Bottles
 
-    func createBottle(name: String, windows: WindowsVersion, graphics: GraphicsBackend) async {
+    @discardableResult
+    func createBottle(name: String, windows: WindowsVersion, graphics: GraphicsBackend, preset: BottlePreset? = nil) async -> Bottle? {
         guard let runtime = bestRuntime(for: graphics, current: defaultRuntime) ?? defaultRuntime else {
-            return show(WineError.noRuntimeAvailable)
+            show(WineError.noRuntimeAvailable)
+            return nil
         }
         busyMessage = "Criando “\(name)”… (o primeiro wineboot leva alguns segundos)"
         defer { busyMessage = nil }
         do {
-            let settings = BottleSettings(
-                name: name,
-                runtimeID: runtime.id,
-                windowsVersion: windows,
-                graphics: runtime.supports(graphics) ? graphics : .wined3d
-            )
+            var settings = BottleSettings(name: name, runtimeID: runtime.id, windowsVersion: windows, graphics: graphics)
+            preset?.apply(to: &settings)
+            if !runtime.supports(settings.graphics) { settings.graphics = .wined3d }
             let bottle = try await manager.create(settings)
             let runner = WineRunner(runtime: runtime)
             log(bottle.id, "Inicializando prefixo com \(runtime.displayName)…")
@@ -124,9 +142,11 @@ final class AppModel {
             await refresh()
             selection = bottle.id
             rescanPrograms()
+            return bottle
         } catch {
             show(error)
             await refresh()
+            return nil
         }
     }
 
@@ -403,6 +423,127 @@ final class AppModel {
                 show(error)
             }
         }
+    }
+
+    // MARK: Receitas
+
+    func loadRecipes() async {
+        let user = RecipeLibrary.loadUser()
+        var errors = user.errors
+        var community: [RecipeEntry] = []
+        let index = communityIndexURL.trimmingCharacters(in: .whitespaces)
+        if !index.isEmpty {
+            if let url = URL(string: index) {
+                do {
+                    let remote = try await RecipeLibrary.loadCommunity(index: url)
+                    community = remote.entries
+                    errors += remote.errors
+                } catch {
+                    errors.append("Fonte comunitária: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+                }
+            } else {
+                errors.append("Fonte comunitária: URL inválida")
+            }
+        }
+        recipes = RecipeLibrary.merge([RecipeLibrary.builtIn(), community, user.entries])
+        recipeErrors = errors
+    }
+
+    /// Copia um .yaml para a pasta de receitas do usuário.
+    func importRecipe() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "yaml"), UTType(filenameExtension: "yml")].compactMap { $0 }
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+        do {
+            let dir = RecipeLibrary.userDirectory
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            for url in panel.urls {
+                _ = try Recipe.parse(String(contentsOf: url, encoding: .utf8)) // valida antes de copiar
+                let dest = dir.appendingPathComponent(url.lastPathComponent)
+                if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
+                try FileManager.default.copyItem(at: url, to: dest)
+            }
+            Task { await loadRecipes() }
+        } catch {
+            show(error)
+        }
+    }
+
+    /// Instala uma receita num bottle novo (target nil) ou existente.
+    func install(_ entry: RecipeEntry, into target: Bottle?) {
+        guard recipeRun == nil else { return }
+        let recipe = entry.recipe
+        isShowingRecipes = false
+
+        recipeTask = Task {
+            var chosen = target
+            if chosen == nil {
+                let name = uniqueBottleName(recipe.name)
+                chosen = await createBottle(
+                    name: name,
+                    windows: recipe.bottle?.windows ?? .win10,
+                    graphics: recipe.bottle?.graphics ?? .dxmt,
+                    preset: recipe.bottle
+                )
+            } else if let b = chosen, autoSnapshotInstallers {
+                await createSnapshot(b, label: "Antes de \(recipe.name)")
+            }
+            guard let bottle = chosen, let runtime = runtime(for: bottle) else { recipeTask = nil; return }
+
+            recipeRun = RecipeRunState(recipeName: recipe.name, bottleID: bottle.id)
+            selection = bottle.id
+            log(bottle.id, "🍷 Receita: \(recipe.name)\(recipe.isVerified ? "" : " (não verificada)")")
+
+            let id = bottle.id
+            do {
+                try await RecipeRunner(runtime: runtime).run(recipe, in: bottle) { event in
+                    Task { @MainActor [weak self] in self?.handle(event, bottle: id) }
+                }
+                if let program = recipe.launch?.program, let url = WindowsPath.toUnix(program, in: bottle),
+                   FileManager.default.fileExists(atPath: url.path) {
+                    await pin(url, in: bottle)
+                }
+                log(id, "✅ \(recipe.name) instalado.")
+                if let notes = recipe.notes { log(id, "ℹ️ \(notes)") }
+            } catch is CancellationError {
+                log(id, "Instalação cancelada.")
+            } catch {
+                log(id, "❌ \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+                show(error)
+            }
+            recipeRun = nil
+            recipeTask = nil
+            rescanPrograms()
+        }
+    }
+
+    func cancelRecipe() {
+        recipeTask?.cancel()
+    }
+
+    private func handle(_ event: RecipeRunner.Event, bottle id: Bottle.ID) {
+        switch event {
+        case .step(let index, let total, let title):
+            recipeRun?.step = "\(index)/\(total) · \(title)"
+            recipeRun?.fraction = nil
+            log(id, "— \(title)")
+        case .progress(let fraction):
+            recipeRun?.fraction = fraction
+        case .log(let line):
+            append(id, LogLine(source: .stdout, text: line))
+        }
+    }
+
+    private func uniqueBottleName(_ base: String) -> String {
+        let taken = Set(bottles.map { $0.name.lowercased() })
+        var name = base
+        var n = 2
+        while taken.contains(name.lowercased()) {
+            name = "\(base) \(n)"
+            n += 1
+        }
+        return name
     }
 
     // MARK: Atalhos (Launchpad / Spotlight / Dock)

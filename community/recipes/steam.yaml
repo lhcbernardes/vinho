@@ -1,0 +1,21 @@
+id: steam
+name: Steam
+revision: 1
+category: game
+description: Loja e biblioteca de jogos da Valve.
+homepage: https://store.steampowered.com
+notes: Se a janela da Steam ficar preta, troque o backend gráfico para WineD3D.
+bottle:
+  windows: win10
+  graphics: dxmt
+requires:
+  capabilities: [dxmt]
+steps:
+  - download:
+      url: https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe
+      file: SteamSetup.exe
+  - run:
+      file: SteamSetup.exe
+      args: ["/S"]
+launch:
+  program: 'C:\Program Files (x86)\Steam\steam.exe'

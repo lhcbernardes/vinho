@@ -1,0 +1,259 @@
+import XCTest
+@testable import WineKit
+
+/// Registra as invocações e responde "saiu com 0".
+final class RecordingLauncher: ProcessLaunching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _invocations: [WineInvocation] = []
+    let exitCode: Int32
+
+    init(exitCode: Int32 = 0) { self.exitCode = exitCode }
+
+    var invocations: [WineInvocation] {
+        lock.lock(); defer { lock.unlock() }
+        return _invocations
+    }
+
+    func run(_ invocation: WineInvocation) -> AsyncThrowingStream<ProcessEvent, Error> {
+        lock.lock(); _invocations.append(invocation); lock.unlock()
+        let code = exitCode
+        return AsyncThrowingStream { c in
+            c.yield(.stdout("ok"))
+            c.yield(.exited(code))
+            c.finish()
+        }
+    }
+}
+
+final class RecipeParsingTests: XCTestCase {
+    func testBuiltInRecipesAreValid() {
+        let entries = RecipeLibrary.builtIn()
+        XCTAssertEqual(Set(entries.map(\.id)), ["notepad-plus-plus", "7zip", "steam"])
+        let npp = entries.first { $0.id == "notepad-plus-plus" }!.recipe
+        XCTAssertTrue(npp.isVerified)
+        XCTAssertEqual(npp.launch?.program, #"C:\Program Files\Notepad++\notepad++.exe"#)
+        XCTAssertEqual(npp.bottle?.graphics, .wined3d)
+        XCTAssertFalse(entries.first { $0.id == "steam" }!.recipe.isVerified)
+    }
+
+    func testParsesAllStepKinds() throws {
+        let recipe = try Recipe.parse("""
+        id: jogo-x
+        name: Jogo X
+        category: game
+        description: Teste
+        bottle:
+          windows: win11
+          retina: true
+          environment: { DXMT_LOG: "1" }
+          dllOverrides: { xinput1_3: native, d3dcompiler_47: "native,builtin" }
+        steps:
+          - download: { url: "https://example.com/setup.exe", sha256: "\(String(repeating: "a", count: 64))" }
+          - winetricks: [corefonts, vcrun2019]
+          - registry: { key: 'HKCU\\Software\\X', value: Mode, data: "1" }
+          - run: { file: setup.exe, args: ["/VERYSILENT"], okExitCodes: [0, 1] }
+        launch: { program: 'C:\\Games\\X\\x.exe', args: ["-windowed"] }
+        """)
+        XCTAssertEqual(recipe.category, .game)
+        XCTAssertEqual(recipe.steps.count, 4)
+        XCTAssertTrue(recipe.needsWinetricks)
+        guard case .download(let d) = recipe.steps[0] else { return XCTFail() }
+        XCTAssertEqual(d.fileName, "setup.exe")
+        guard case .run(let r) = recipe.steps[3] else { return XCTFail() }
+        XCTAssertEqual(r.okExitCodes, [0, 1])
+
+        var settings = BottleSettings(name: "x")
+        recipe.bottle?.apply(to: &settings)
+        XCTAssertEqual(settings.windowsVersion, .win11)
+        XCTAssertTrue(settings.retinaMode)
+        XCTAssertEqual(settings.environment["DXMT_LOG"], "1")
+        XCTAssertEqual(settings.dllOverrides["xinput1_3"], .native)
+        XCTAssertEqual(settings.dllOverrides["d3dcompiler_47"], .nativeThenBuiltin)
+    }
+
+    func testValidationErrors() {
+        func invalid(_ yaml: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertThrowsError(try Recipe.parse(yaml), file: file, line: line)
+        }
+        // id com maiúsculas
+        invalid("id: Bad\nname: x\nsteps:\n  - run: { file: 'C:\\x.exe' }")
+        // download http
+        invalid("id: a\nname: x\nsteps:\n  - download: { url: 'http://x.com/a.exe' }")
+        // run de arquivo não baixado
+        invalid("id: a\nname: x\nsteps:\n  - run: { file: nada.exe }")
+        // passo desconhecido
+        invalid("id: a\nname: x\nsteps:\n  - format: { disk: c }")
+        // dois passos no mesmo item
+        invalid("id: a\nname: x\nsteps:\n  - { winetricks: [a], registry: { key: HKCU, value: v, data: d } }")
+        // override inválido
+        invalid("id: a\nname: x\nbottle: { dllOverrides: { d3d11: talvez } }\nsteps:\n  - run: { file: 'C:\\x.exe' }")
+        // verbo winetricks com shell
+        invalid("id: a\nname: x\nsteps:\n  - winetricks: ['a; rm -rf ~']")
+        // nome de arquivo com path traversal
+        invalid("id: a\nname: x\nsteps:\n  - download: { url: 'https://x.com/a', file: '../../a.exe' }")
+    }
+}
+
+final class RecipeRunnerTests: XCTestCase {
+    private var work: URL!
+    private let fm = FileManager.default
+
+    override func setUpWithError() throws {
+        work = fm.temporaryDirectory.appendingPathComponent("vinho-recipe-\(UUID().uuidString)")
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? fm.removeItem(at: work)
+    }
+
+    private func setup() throws -> (installer: URL, sha: String, bottle: Bottle, runtime: WineRuntime) {
+        let installer = work.appendingPathComponent("source-setup.exe")
+        try Data("MZ fake installer".utf8).write(to: installer)
+        let bottle = Bottle(url: work.appendingPathComponent("bottle"), settings: BottleSettings(name: "b"))
+        let runtime = WineRuntime(id: "rt", rootURL: URL(fileURLWithPath: "/opt/wine"), capabilities: [])
+        return (installer, try Checksum.sha256(of: installer), bottle, runtime)
+    }
+
+    func testRunsStepsInOrderAndCaches() async throws {
+        let (installer, sha, bottle, runtime) = try setup()
+        let recipe = try Recipe.parse("""
+        id: app-teste
+        name: App
+        steps:
+          - download: { url: "https://example.com/s.exe", sha256: "\(sha)", file: setup.exe }
+          - registry: { key: 'HKCU\\Software\\App', value: Mode, data: "on" }
+          - winetricks: [corefonts]
+          - run: { file: setup.exe, args: ["/S"] }
+        """)
+        let launcher = RecordingLauncher()
+        let runner = RecipeRunner(
+            runtime: runtime, launcher: launcher,
+            downloader: LocalFileDownloader(source: installer),
+            cacheDirectory: work.appendingPathComponent("cache"),
+            winetricksURL: URL(fileURLWithPath: "/opt/homebrew/bin/winetricks")
+        )
+        let steps = PhaseRecorderStrings()
+        try await runner.run(recipe, in: bottle) { event in
+            if case .step(_, _, let title) = event { steps.add(title) }
+        }
+
+        XCTAssertEqual(steps.values, ["Baixando setup.exe", "Registro: Mode", "winetricks corefonts", "Executando setup.exe"])
+
+        let cached = work.appendingPathComponent("cache/app-teste/setup.exe")
+        XCTAssertTrue(fm.fileExists(atPath: cached.path))
+
+        // Ignora as chamadas ao wineserver (-w) e olha só os comandos.
+        let commands = launcher.invocations.filter { $0.executable.lastPathComponent != "wineserver" }
+        XCTAssertEqual(commands.count, 3)
+        XCTAssertEqual(commands[0].arguments.prefix(3), ["reg", "add", #"HKCU\Software\App"#])
+        XCTAssertEqual(commands[1].executable.path, "/opt/homebrew/bin/winetricks")
+        XCTAssertEqual(commands[1].arguments, ["-q", "corefonts"])
+        XCTAssertEqual(commands[1].environment["WINE"], "/opt/wine/bin/wine")
+        XCTAssertEqual(commands[1].environment["WINEPREFIX"], bottle.url.path)
+        XCTAssertEqual(commands[2].arguments, [cached.path, "/S"])
+        XCTAssertEqual(commands[2].currentDirectory?.path, cached.deletingLastPathComponent().path)
+    }
+
+    func testChecksumMismatchStops() async throws {
+        let (installer, _, bottle, runtime) = try setup()
+        let recipe = try Recipe.parse("""
+        id: app-ruim
+        name: App
+        steps:
+          - download: { url: "https://example.com/s.exe", sha256: "\(String(repeating: "0", count: 64))", file: s.exe }
+          - run: { file: s.exe }
+        """)
+        let launcher = RecordingLauncher()
+        let runner = RecipeRunner(runtime: runtime, launcher: launcher,
+                                  downloader: LocalFileDownloader(source: installer),
+                                  cacheDirectory: work.appendingPathComponent("cache"), winetricksURL: nil)
+        do {
+            try await runner.run(recipe, in: bottle)
+            XCTFail("deveria falhar")
+        } catch let error as WineError {
+            guard case .checksumMismatch = error else { return XCTFail("\(error)") }
+        }
+        XCTAssertTrue(launcher.invocations.isEmpty, "nada pode executar depois de um checksum errado")
+    }
+
+    func testFailingInstallerThrowsAndWinetricksIsRequired() async throws {
+        let (installer, sha, bottle, runtime) = try setup()
+        let recipe = try Recipe.parse("""
+        id: app-falha
+        name: App
+        steps:
+          - download: { url: "https://example.com/s.exe", sha256: "\(sha)", file: s.exe }
+          - run: { file: s.exe }
+        """)
+        let runner = RecipeRunner(runtime: runtime, launcher: RecordingLauncher(exitCode: 2),
+                                  downloader: LocalFileDownloader(source: installer),
+                                  cacheDirectory: work.appendingPathComponent("cache"), winetricksURL: nil)
+        do {
+            try await runner.run(recipe, in: bottle)
+            XCTFail("deveria falhar")
+        } catch let error as WineError {
+            guard case .nonZeroExit(_, let code, _) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(code, 2)
+        }
+
+        let needsWinetricks = try Recipe.parse("id: wt\nname: x\nsteps:\n  - winetricks: [corefonts]")
+        do {
+            try await runner.run(needsWinetricks, in: bottle)
+            XCTFail("deveria exigir winetricks")
+        } catch let error as RecipeError {
+            XCTAssertEqual(error, .winetricksMissing)
+        }
+    }
+}
+
+final class RecipeLibraryTests: XCTestCase {
+    func testUserAndCommunityLayersOverrideBuiltIn() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vinho-lib-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let user = dir.appendingPathComponent("user")
+        let community = dir.appendingPathComponent("community")
+        try FileManager.default.createDirectory(at: user, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: community.appendingPathComponent("recipes"), withIntermediateDirectories: true)
+
+        try "id: 7zip\nname: 7-Zip (minha)\nsteps:\n  - run: { file: 'C:\\x.exe' }".write(to: user.appendingPathComponent("7zip.yaml"), atomically: true, encoding: .utf8)
+        try "isto: [não é: receita".write(to: user.appendingPathComponent("quebrada.yml"), atomically: true, encoding: .utf8)
+
+        try "recipes:\n  - recipes/jogo.yaml\n  - recipes/faltando.yaml\n".write(to: community.appendingPathComponent("index.yaml"), atomically: true, encoding: .utf8)
+        try "id: jogo\nname: Jogo Comunitário\ncategory: game\nsteps:\n  - run: { file: 'C:\\j.exe' }".write(to: community.appendingPathComponent("recipes/jogo.yaml"), atomically: true, encoding: .utf8)
+
+        let local = RecipeLibrary.loadUser(from: user)
+        XCTAssertEqual(local.entries.map(\.id), ["7zip"])
+        XCTAssertEqual(local.errors.count, 1)
+
+        let remote = try await RecipeLibrary.loadCommunity(index: community.appendingPathComponent("index.yaml"))
+        XCTAssertEqual(remote.entries.map(\.id), ["jogo"])
+        XCTAssertEqual(remote.errors.count, 1, "arquivo faltando vira erro, não exceção")
+
+        let merged = RecipeLibrary.merge([RecipeLibrary.builtIn(), remote.entries, local.entries])
+        XCTAssertEqual(merged.first { $0.id == "7zip" }?.recipe.name, "7-Zip (minha)")
+        XCTAssertEqual(merged.first { $0.id == "jogo" }?.source.label, "Comunidade")
+        XCTAssertEqual(Set(merged.map(\.id)), ["7zip", "notepad-plus-plus", "steam", "jogo"])
+    }
+}
+
+final class PhaseRecorderStrings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _values: [String] = []
+    func add(_ v: String) { lock.lock(); _values.append(v); lock.unlock() }
+    var values: [String] { lock.lock(); defer { lock.unlock() }; return _values }
+}
+
+final class CommunityFolderTests: XCTestCase {
+    /// `community/` deve continuar válido e espelhar as receitas embutidas.
+    func testRepositoryCommunityIndexIsValid() async throws {
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let index = repo.appendingPathComponent("community/index.yaml")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: index.path), "community/ não encontrado")
+
+        let result = try await RecipeLibrary.loadCommunity(index: index)
+        XCTAssertEqual(result.errors, [])
+        XCTAssertEqual(Set(result.entries.map(\.id)), Set(RecipeLibrary.builtIn().map(\.id)))
+    }
+}

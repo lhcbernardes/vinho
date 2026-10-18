@@ -19,6 +19,8 @@ struct VinhoApp: App {
                     .keyboardShortcut("n")
                 Button("Importar Bottle…") { model.importBottle() }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("Receitas…") { model.isShowingRecipes = true }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
             }
             CommandMenu("Bottle") {
                 Button("Executar Programa…") { model.isPickingProgram = true }

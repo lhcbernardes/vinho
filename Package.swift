@@ -9,9 +9,13 @@ let package = Package(
         .library(name: "WineKit", targets: ["WineKit"]),
         .executable(name: "Vinho", targets: ["Vinho"]),
     ],
+    dependencies: [
+        // Parser YAML para as receitas de instalação.
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
+    ],
     targets: [
-        // Núcleo sem dependência de UI: bottles, runtimes, processos Wine.
-        .target(name: "WineKit"),
+        // Núcleo sem dependência de UI: bottles, runtimes, processos Wine, receitas.
+        .target(name: "WineKit", dependencies: ["Yams"]),
         // App SwiftUI.
         .executableTarget(name: "Vinho", dependencies: ["WineKit"]),
         .testTarget(name: "WineKitTests", dependencies: ["WineKit"]),
