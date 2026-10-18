@@ -6,14 +6,19 @@ name: Wine runtime (CrossOver)
 # (Catalog.communityURL) e mostra o runtime em Ajustes ▸ Runtimes.
 #
 # Rode em Actions ▸ "Wine runtime (CrossOver)" ▸ Run workflow, informando a
-# versão (ex.: 25.1.0). Lista: https://media.codeweavers.com/pub/crossover/source/
+# versão (ex.: 26.3.0). Lista: https://www.codeweavers.com/crossover/source
+#
+# Dependências vêm do MacPorts (pacotes binários x86_64 prontos) e o
+# compilador PE é o llvm-mingw — o mesmo esquema dos builds do Gcenx. O
+# Homebrew não serve aqui: no Intel ele compila tudo do código-fonte (horas).
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Versão do CrossOver (ex.: 25.1.0)"
+        description: "Versão do CrossOver (ex.: 26.3.0)"
         required: true
+        default: "26.3.0"
       revision:
         description: "Revisão do pacote (aumente para republicar a mesma versão)"
         required: false
@@ -25,75 +30,111 @@ permissions:
 env:
   CX_VERSION: ${{ inputs.version }}
   RUNTIME_ID: wine-cx-${{ inputs.version }}_${{ inputs.revision }}
-  # Dependências que o Wine abre com dlopen e que vão junto em lib/.
-  BUNDLED_FORMULAE: freetype gnutls nettle gmp libtasn1 p11-kit libidn2 libunistring gettext molten-vk sdl2 libpng
+  GH_TOKEN: ${{ github.token }}
+  MACPORTS: bison pkgconfig gettext freetype gnutls libsdl2 moltenvk
+  # Bibliotecas que o Wine abre com dlopen; vão junto em lib/ com as dependências.
+  BUNDLED_LIBS: libfreetype.6.dylib libgnutls.30.dylib libSDL2-2.0.0.dylib libMoltenVK.dylib
 
 jobs:
   build:
     # x86_64 nativo: o Wine roda sob Rosetta 2 nos Macs Apple Silicon.
     runs-on: macos-15-intel
-    timeout-minutes: 300
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
-      - name: Dependências de build
+      - name: MacPorts e dependências
         run: |
-          brew update
-          brew install bison flex pkgconf mingw-w64 \
-            freetype gnutls molten-vk sdl2 gstreamer gettext libpng
-          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
-          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          gh release download -R macports/macports-base -p '*-15-Sequoia.pkg' -O macports.pkg
+          sudo installer -pkg macports.pkg -target /
+          export PATH="/opt/local/bin:/opt/local/sbin:$PATH"
+          echo "/opt/local/sbin" >> "$GITHUB_PATH"
+          echo "/opt/local/bin" >> "$GITHUB_PATH"
+          sudo port -N selfupdate
+          sudo port -N install $MACPORTS
+          port installed
+
+      - name: llvm-mingw
+        run: |
+          gh release download -R mstorsjo/llvm-mingw -p '*-ucrt-macos-universal.tar.xz' -O llvm-mingw.tar.xz
+          mkdir -p "$RUNNER_TEMP/llvm-mingw"
+          tar -xJf llvm-mingw.tar.xz --strip-components=1 -C "$RUNNER_TEMP/llvm-mingw"
+          echo "$RUNNER_TEMP/llvm-mingw/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/llvm-mingw/bin/x86_64-w64-mingw32-clang" --version
 
       - name: Baixar o código-fonte da CodeWeavers
         run: |
-          curl -fL --retry 3 -o cx.tar.gz \
-            "https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CX_VERSION}.tar.gz"
+          URL="https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CX_VERSION}.tar.gz"
+          if ! curl -fL --retry 3 -o cx.tar.gz "$URL"; then
+            echo "::error::$URL não existe. Veja as versões em https://www.codeweavers.com/crossover/source"
+            exit 1
+          fi
           shasum -a 256 cx.tar.gz | tee cx.tar.gz.sha256
-          tar -xzf cx.tar.gz
-          test -x sources/wine/configure
+          mkdir -p cx && tar -xzf cx.tar.gz -C cx
+          CONFIGURE="$(find cx -maxdepth 4 -path '*/wine/configure' | head -1)"
+          test -n "$CONFIGURE" && test -x "$CONFIGURE"
+          echo "WINE_SRC=$PWD/$(dirname "$CONFIGURE")" >> "$GITHUB_ENV"
 
       - name: Configurar
         run: |
           mkdir -p build && cd build
           export CC=clang CXX=clang++
-          export CPATH="$(brew --prefix)/include"
-          export LIBRARY_PATH="$(brew --prefix)/lib"
-          export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
+          export CPATH=/opt/local/include
+          export LIBRARY_PATH=/opt/local/lib
+          export PKG_CONFIG=/opt/local/bin/pkg-config
+          export PKG_CONFIG_PATH=/opt/local/lib/pkgconfig
           export MACOSX_DEPLOYMENT_TARGET=11.0
           export CROSSCFLAGS="-g -O2"
           export CFLAGS="-g -O2 -Wno-deprecated-declarations -Wno-incompatible-function-pointer-types -Wno-int-conversion"
-          ../sources/wine/configure \
+          "$WINE_SRC/configure" \
             --prefix= \
+            --build=x86_64-apple-darwin \
             --disable-tests \
             --enable-archs=i386,x86_64 \
+            --with-mingw \
             --with-coreaudio --with-cups --with-freetype --with-gettext --with-gnutls \
-            --with-gstreamer --with-mingw --with-opencl --with-opengl --with-pthread \
-            --with-sdl --with-unwind --with-vulkan \
-            --without-alsa --without-capi --without-dbus --without-fontconfig \
-            --without-gettextpo --without-gphoto --without-gssapi --without-inotify \
-            --without-krb5 --without-netapi --without-oss --without-pcap --without-pulse \
-            --without-sane --without-udev --without-usb --without-v4l2 --without-x
+            --with-opencl --with-opengl --with-pthread --with-sdl --with-unwind --with-vulkan \
+            --without-alsa --without-capi --without-dbus --without-ffmpeg --without-fontconfig \
+            --without-gettextpo --without-gphoto --without-gssapi --without-gstreamer \
+            --without-inotify --without-krb5 --without-netapi --without-oss --without-pcap \
+            --without-pcsclite --without-pulse --without-sane --without-udev --without-usb \
+            --without-v4l2 --without-va --without-wayland --without-x \
+            || { tail -100 config.log; exit 1; }
 
       - name: Compilar
         run: make -C build -j"$(sysctl -n hw.ncpu)"
 
       - name: Instalar e empacotar
         run: |
-          DEST="$PWD/out/$RUNTIME_ID"
+          export DEST="$PWD/out/$RUNTIME_ID"
           make -C build install-lib DESTDIR="$DEST"
-          # Dependências abertas por dlopen (o Vinho aponta DYLD_FALLBACK_LIBRARY_PATH para lib/).
-          for f in $BUNDLED_FORMULAE; do
-            cp -a "$(brew --prefix "$f")"/lib/*.dylib "$DEST/lib/" 2>/dev/null || true
-          done
+          # Bibliotecas abertas por dlopen + tudo de que elas dependem
+          # (o Vinho aponta DYLD_FALLBACK_LIBRARY_PATH para lib/).
+          python3 - <<'PY'
+          import os, shutil, subprocess
+          dest = os.path.join(os.environ["DEST"], "lib"); src = "/opt/local/lib"
+          todo, seen = os.environ["BUNDLED_LIBS"].split(), set()
+          while todo:
+              name = todo.pop()
+              if name in seen: continue
+              seen.add(name)
+              path = os.path.realpath(os.path.join(src, name))
+              if not os.path.exists(path):
+                  raise SystemExit(f"falta {name}")
+              shutil.copy2(path, os.path.join(dest, name))
+              for line in subprocess.run(["otool", "-L", path], capture_output=True, text=True).stdout.splitlines()[1:]:
+                  dep = line.strip().split(" ")[0]
+                  if dep.startswith(src + "/"): todo.append(os.path.basename(dep))
+          print("bibliotecas:", " ".join(sorted(seen)))
+          PY
           touch "$DEST/VINHO_BUNDLED_LIBS"
           echo "$CX_VERSION" > "$DEST/VERSION"
-          "$DEST/bin/wine" --version || true
+          DYLD_FALLBACK_LIBRARY_PATH="$DEST/lib" "$DEST/bin/wine" --version || true
           tar -C out -cJf "$RUNTIME_ID-osx64.tar.xz" "$RUNTIME_ID"
           ls -lh "$RUNTIME_ID-osx64.tar.xz"
 
       - name: Atualizar runtimes.json
         env:
-          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           gh release view runtimes >/dev/null 2>&1 || \
