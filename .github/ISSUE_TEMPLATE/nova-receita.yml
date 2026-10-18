@@ -1,0 +1,21 @@
+name: Pedido ou proposta de receita
+description: Peça uma receita para um app/jogo ou proponha uma pronta.
+title: "[receita] "
+labels: [receita]
+body:
+  - type: input
+    id: programa
+    attributes:
+      label: Programa
+    validations:
+      required: true
+  - type: input
+    id: download
+    attributes:
+      label: Link oficial do instalador
+  - type: textarea
+    id: yaml
+    attributes:
+      label: Receita (opcional)
+      description: Formato em docs/RECEITAS.md
+      render: yaml

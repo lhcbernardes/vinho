@@ -88,6 +88,10 @@ public struct BottleSettings: Codable, Hashable, Sendable {
     public var dllOverrides: [String: DLLOverrideMode]
     /// Programas fixados pelo usuário (caminhos Unix absolutos).
     public var pinnedPrograms: [String]
+    /// Receitas instaladas neste bottle (id → revisão).
+    public var installedRecipes: [String: Int]
+    /// Avaliação de compatibilidade por programa (caminho Unix → nota).
+    public var compatibility: [String: CompatibilityRating]
     public var createdAt: Date
 
     public init(
@@ -102,6 +106,8 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         environment: [String: String] = [:],
         dllOverrides: [String: DLLOverrideMode] = [:],
         pinnedPrograms: [String] = [],
+        installedRecipes: [String: Int] = [:],
+        compatibility: [String: CompatibilityRating] = [:],
         createdAt: Date = Date()
     ) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -116,12 +122,14 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         self.environment = environment
         self.dllOverrides = dllOverrides
         self.pinnedPrograms = pinnedPrograms
+        self.installedRecipes = installedRecipes
+        self.compatibility = compatibility
         self.createdAt = createdAt
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, name, runtimeID, windowsVersion, graphics, sync, logLevel
-        case retinaMode, metalHUD, environment, dllOverrides, pinnedPrograms, createdAt
+        case retinaMode, metalHUD, environment, dllOverrides, pinnedPrograms, installedRecipes, compatibility, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -139,6 +147,8 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         dllOverrides = (try? c.decodeIfPresent([String: DLLOverrideMode].self, forKey: .dllOverrides)) ?? [:]
         pinnedPrograms = try c.decodeIfPresent([String].self, forKey: .pinnedPrograms) ?? []
+        installedRecipes = (try? c.decodeIfPresent([String: Int].self, forKey: .installedRecipes)) ?? [:]
+        compatibility = (try? c.decodeIfPresent([String: CompatibilityRating].self, forKey: .compatibility)) ?? [:]
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 }

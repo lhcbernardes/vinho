@@ -52,6 +52,14 @@ final class AppModel {
         didSet { UserDefaults.standard.set(communityIndexURL, forKey: "communityIndexURL") }
     }
 
+    /// `owner/repo` onde os relatórios de compatibilidade viram issues.
+    var communityRepo: String {
+        didSet { UserDefaults.standard.set(communityRepo, forKey: "communityRepo") }
+    }
+
+    /// Programa sendo avaliado (abre a folha "Funcionou?").
+    var reporting: Program?
+
     var snapshots: [Bottle.ID: [BottleSnapshot]] = [:]
     private let snapshotManager = SnapshotManager()
 
@@ -71,6 +79,7 @@ final class AppModel {
         defaultRuntimeID = UserDefaults.standard.string(forKey: "defaultRuntimeID")
         autoSnapshotInstallers = UserDefaults.standard.object(forKey: "autoSnapshotInstallers") as? Bool ?? true
         communityIndexURL = UserDefaults.standard.string(forKey: "communityIndexURL") ?? ""
+        communityRepo = UserDefaults.standard.string(forKey: "communityRepo") ?? ""
     }
 
     // MARK: Derivados
@@ -500,6 +509,7 @@ final class AppModel {
                 try await RecipeRunner(runtime: runtime).run(recipe, in: bottle) { event in
                     Task { @MainActor [weak self] in self?.handle(event, bottle: id) }
                 }
+                await update(bottle) { $0.installedRecipes[recipe.id] = recipe.revision ?? 1 }
                 if let program = recipe.launch?.program, let url = WindowsPath.toUnix(program, in: bottle),
                    FileManager.default.fileExists(atPath: url.path) {
                     await pin(url, in: bottle)
@@ -544,6 +554,50 @@ final class AppModel {
             n += 1
         }
         return name
+    }
+
+    // MARK: Compatibilidade
+
+    static var vinhoVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
+    func rating(for program: Program, in bottle: Bottle) -> CompatibilityRating? {
+        bottle.settings.compatibility[program.url.path]
+    }
+
+    func makeReport(for program: Program, in bottle: Bottle, rating: CompatibilityRating, notes: String) -> CompatibilityReport {
+        let current = bottles.first { $0.id == bottle.id } ?? bottle
+        let runtime = runtime(for: current)
+        return CompatibilityReport(
+            program: program.name,
+            rating: rating,
+            notes: notes,
+            recipes: current.settings.installedRecipes,
+            runtime: runtime.map { r in displayVersion(r).map { "\(r.id) (\($0))" } ?? r.id } ?? "—",
+            backend: current.settings.graphics,
+            windows: current.settings.windowsVersion,
+            macOS: CompatibilityReport.macOSVersion,
+            hardware: CompatibilityReport.hardwareDescription,
+            vinhoVersion: Self.vinhoVersion
+        )
+    }
+
+    /// Guarda a nota localmente e, se pedido, abre a issue pré-preenchida.
+    func submit(_ report: CompatibilityReport, program: Program, in bottle: Bottle, openGitHub: Bool) async {
+        await update(bottle) { $0.compatibility[program.url.path] = report.rating }
+        if openGitHub {
+            if let url = report.issueURL(repository: communityRepo) {
+                NSWorkspace.shared.open(url)
+            } else {
+                errorMessage = "Configure o repositório da comunidade (owner/repo) em Ajustes ▸ Geral."
+            }
+        }
+    }
+
+    func copyReport(_ report: CompatibilityReport) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("# \(report.title)\n\n\(report.markdown)", forType: .string)
     }
 
     // MARK: Atalhos (Launchpad / Spotlight / Dock)

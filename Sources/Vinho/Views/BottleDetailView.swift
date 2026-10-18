@@ -68,6 +68,9 @@ struct BottleDetailView: View {
                 tab = .logs
             }
         }
+        .sheet(item: $model.reporting) { program in
+            ReportCompatibilitySheet(program: program, bottle: bottle)
+        }
         .dropDestination(for: URL.self) { urls, _ in
             let launchable = urls.filter { ["exe", "msi", "lnk", "bat"].contains($0.pathExtension.lowercased()) }
             launchable.forEach { model.launch($0, in: bottle) }
@@ -134,6 +137,12 @@ private struct ProgramsGrid: View {
                         Button { model.launch(program.url, in: bottle) } label: {
                             VStack(spacing: 8) {
                                 ProgramIconView(program: program, bottle: bottle)
+                                    .overlay(alignment: .topTrailing) {
+                                        if let rating = model.rating(for: program, in: bottle) {
+                                            Text(rating.symbol).font(.caption).offset(x: 4, y: -4)
+                                                .help(rating.displayName)
+                                        }
+                                    }
                                 Text(program.name)
                                     .font(.callout)
                                     .lineLimit(2)
@@ -148,6 +157,8 @@ private struct ProgramsGrid: View {
                             Button("Executar") { model.launch(program.url, in: bottle) }
                             Button("Fixar") { Task { await model.pin(program.url, in: bottle) } }
                             Button("Criar atalho no Launchpad") { model.createShortcut(for: program, in: bottle) }
+                            Divider()
+                            Button("Funcionou? Avaliar…") { model.reporting = program }
                             Button("Mostrar no Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([program.url])
                             }

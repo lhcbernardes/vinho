@@ -22,6 +22,8 @@ private struct GeneralSettingsView: View {
 
         Form {
             Section {
+                TextField("Repositório (owner/repo)", text: $model.communityRepo,
+                          prompt: Text("leandro/vinho"))
                 TextField("URL do índice", text: $model.communityIndexURL,
                           prompt: Text("https://raw.githubusercontent.com/<você>/vinho-recipes/main/index.yaml"))
                 HStack {
@@ -33,9 +35,9 @@ private struct GeneralSettingsView: View {
                     }
                 }
             } header: {
-                Text("Receitas da comunidade")
+                Text("Comunidade")
             } footer: {
-                Text("Um arquivo index.yaml com `recipes: [arquivo.yaml, …]`. Veja community/ no repositório do Vinho.")
+                Text("O repositório recebe os relatórios “Funcionou?” como issues. O índice é um index.yaml com `recipes: [arquivo.yaml, …]` — veja community/ no projeto.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

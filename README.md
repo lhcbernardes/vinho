@@ -97,11 +97,27 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] Catálogo no app (⇧⌘R) com instalação em bottle novo ou existente, progresso e cancelamento
 - [x] Camadas: embutidas < comunidade (`index.yaml` remoto) < do usuário
 - [x] Pasta `community/` pronta para virar repositório — formato em [`docs/RECEITAS.md`](docs/RECEITAS.md)
-- [ ] Relatórios de compatibilidade ("funcionou?") enviados para o repositório comunitário
+- [x] Relatórios de compatibilidade ("Funcionou?") como issues pré-preenchidas no GitHub
+
+**Fase 5 — Comunidade** ✅
+- [x] CI (GitHub Actions) com testes e validação das receitas de `community/`
+- [x] Release automático do `Vinho.app` ao criar uma tag `v*`
+- [x] Templates de issue (compatibilidade, pedido de receita) e de PR
+- [x] Licença MIT e [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 Veja também [`docs/ANALISE-CROSSOVER.md`](docs/ANALISE-CROSSOVER.md).
 
+## Publicando no GitHub
+
+```bash
+gh repo create vinho --public --source . --push
+git tag v0.5.0 && git push --tags   # dispara o release com o Vinho.app
+```
+
+Depois, em **Ajustes ▸ Geral ▸ Comunidade**, configure `seu-usuario/vinho` e a URL raw de
+`community/index.yaml`.
+
 ## Licença
 
-MIT (proposta). Wine é LGPL; DXVK/DXMT/MoltenVK têm licenças próprias;
+MIT — veja [LICENSE](LICENSE). Wine é LGPL; DXVK/DXMT/MoltenVK têm licenças próprias;
 D3DMetal pertence à Apple — verifique os termos antes de redistribuir.

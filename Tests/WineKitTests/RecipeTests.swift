@@ -257,3 +257,46 @@ final class CommunityFolderTests: XCTestCase {
         XCTAssertEqual(Set(result.entries.map(\.id)), Set(RecipeLibrary.builtIn().map(\.id)))
     }
 }
+
+final class CompatibilityReportTests: XCTestCase {
+    private func report(notes: String = "Roda a 60 fps.\nSem som no menu.") -> CompatibilityReport {
+        CompatibilityReport(
+            program: "Steam", rating: .playable, notes: notes, recipes: ["steam": 1],
+            runtime: "wine-stable-11.0_1+dxmt-v0.80", backend: .dxmt, windows: .win10,
+            macOS: "26.1.0", hardware: "Apple M2 Pro", vinhoVersion: "0.4.0"
+        )
+    }
+
+    func testMarkdownContainsContextButNoPaths() {
+        let md = report().markdown
+        XCTAssertTrue(md.contains("🟡 Steam: Funciona"))
+        XCTAssertTrue(md.contains("`steam` r1"))
+        XCTAssertTrue(md.contains("| Gráficos | DXMT |"))
+        XCTAssertTrue(md.contains("Sem som no menu."))
+        XCTAssertFalse(md.contains("/Users/"))
+        XCTAssertTrue(report(notes: "  ").markdown.contains("_(sem observações)_"))
+    }
+
+    func testIssueURLIsEncodedAndValidatesRepository() throws {
+        let url = try XCTUnwrap(report().issueURL(repository: "leandro/vinho"))
+        XCTAssertEqual(url.host, "github.com")
+        XCTAssertEqual(url.path, "/leandro/vinho/issues/new")
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        XCTAssertEqual(items.first { $0.name == "title" }?.value, "[compat] Steam — Funciona")
+        XCTAssertEqual(items.first { $0.name == "labels" }?.value, "compatibilidade")
+        XCTAssertTrue(items.first { $0.name == "body" }?.value?.contains("Apple M2 Pro") == true)
+
+        XCTAssertNil(report().issueURL(repository: ""))
+        XCTAssertNil(report().issueURL(repository: "https://github.com/x/y"))
+        XCTAssertNil(report().issueURL(repository: "x/y/z"))
+    }
+
+    func testSettingsPersistCompatibilityAndRecipes() throws {
+        var s = BottleSettings(name: "b")
+        s.compatibility["/x/steam.exe"] = .perfect
+        s.installedRecipes["steam"] = 2
+        let back = try BottleManager.decoder.decode(BottleSettings.self, from: BottleManager.encoder.encode(s))
+        XCTAssertEqual(back.compatibility["/x/steam.exe"], .perfect)
+        XCTAssertEqual(back.installedRecipes["steam"], 2)
+    }
+}
