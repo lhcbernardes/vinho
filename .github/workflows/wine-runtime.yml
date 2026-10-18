@@ -89,6 +89,8 @@ jobs:
           export MACOSX_DEPLOYMENT_TARGET=11.0
           export CROSSCFLAGS="-g -O2"
           export CFLAGS="-g -O2 -Wno-deprecated-declarations -Wno-incompatible-function-pointer-types -Wno-int-conversion"
+          # --without-opengl só desliga o EGL (Wine 11 exige libEGL); no Mac o OpenGL
+          # continua pelo CGL do winemac.drv — igual aos builds do Gcenx.
           "$WINE_SRC/configure" \
             --prefix= \
             --build=x86_64-apple-darwin \
@@ -96,7 +98,7 @@ jobs:
             --enable-archs=i386,x86_64 \
             --with-mingw \
             --with-coreaudio --with-cups --with-freetype --with-gettext --with-gnutls \
-            --with-opencl --with-opengl --with-pthread --with-sdl --with-unwind --with-vulkan \
+            --with-opencl --without-opengl --with-pthread --with-sdl --with-unwind --with-vulkan \
             --without-alsa --without-capi --without-dbus --without-ffmpeg --without-fontconfig \
             --without-gettextpo --without-gphoto --without-gssapi --without-gstreamer \
             --without-inotify --without-krb5 --without-netapi --without-oss --without-pcap \
@@ -113,6 +115,8 @@ jobs:
         run: |
           export DEST="$PWD/out/$RUNTIME_ID"
           make -C build install-lib DESTDIR="$DEST"
+          # O L4D2 e companhia precisam do OpenGL (wined3d); sem ele o runtime não serve.
+          test -e "$DEST/lib/wine/x86_64-unix/opengl32.so" || { echo "::error::opengl32.so não foi gerado"; ls "$DEST/lib/wine/x86_64-unix/"; exit 1; }
           # Bibliotecas abertas por dlopen + tudo de que elas dependem
           # (o Vinho aponta DYLD_FALLBACK_LIBRARY_PATH para lib/).
           python3 - <<'PY'
