@@ -59,7 +59,9 @@ jobs:
           gh release download -R mstorsjo/llvm-mingw -p '*-ucrt-macos-universal.tar.xz' -O llvm-mingw.tar.xz
           mkdir -p "$RUNNER_TEMP/llvm-mingw"
           tar -xJf llvm-mingw.tar.xz --strip-components=1 -C "$RUNNER_TEMP/llvm-mingw"
-          echo "$RUNNER_TEMP/llvm-mingw/bin" >> "$GITHUB_PATH"
+          # Fica no fim do PATH (em Configurar/Compilar): o llvm-mingw traz um `clang`
+          # próprio que, na frente, substituiria o clang do Xcode.
+          echo "LLVM_MINGW=$RUNNER_TEMP/llvm-mingw" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/llvm-mingw/bin/x86_64-w64-mingw32-clang" --version
 
       - name: Baixar o código-fonte da CodeWeavers
@@ -78,7 +80,8 @@ jobs:
       - name: Configurar
         run: |
           mkdir -p build && cd build
-          export CC=clang CXX=clang++
+          export PATH="$PATH:$LLVM_MINGW/bin"
+          export CC=/usr/bin/clang CXX=/usr/bin/clang++
           export CPATH=/opt/local/include
           export LIBRARY_PATH=/opt/local/lib
           export PKG_CONFIG=/opt/local/bin/pkg-config
@@ -98,11 +101,13 @@ jobs:
             --without-gettextpo --without-gphoto --without-gssapi --without-gstreamer \
             --without-inotify --without-krb5 --without-netapi --without-oss --without-pcap \
             --without-pcsclite --without-pulse --without-sane --without-udev --without-usb \
-            --without-v4l2 --without-va --without-wayland --without-x \
-            || { tail -100 config.log; exit 1; }
+            --without-v4l2 --without-wayland --without-x \
+            || { grep -n -B2 -A25 "checking whether the C compiler works" config.log | head -80; tail -60 config.log; exit 1; }
 
       - name: Compilar
-        run: make -C build -j"$(sysctl -n hw.ncpu)"
+        run: |
+          export PATH="$PATH:$LLVM_MINGW/bin"
+          make -C build -j"$(sysctl -n hw.ncpu)"
 
       - name: Instalar e empacotar
         run: |
