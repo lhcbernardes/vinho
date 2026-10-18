@@ -102,12 +102,15 @@ private struct RecipeRow: View {
                         Badge("não verificada", color: .orange)
                     }
                     if recipe.needsWinetricks { Badge("winetricks", color: .blue) }
+                    if let game = recipe.game {
+                        Badge("Steam · \(game.directx.map { "DX\($0)" } ?? game.family.displayName)", color: .purple)
+                    }
                 }
                 if let summary = recipe.summary { Text(summary).foregroundStyle(.secondary) }
                 HStack(spacing: 8) {
                     if let g = recipe.bottle?.graphics { Text(g.displayName) }
                     if let w = recipe.bottle?.windows { Text(w.displayName) }
-                    Text("\(recipe.steps.count) passo(s)")
+                    if recipe.game == nil { Text("\(recipe.steps.count) passo(s)") }
                 }
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -149,20 +152,51 @@ private struct InstallRecipeSheet: View {
     let entry: RecipeEntry
     @State private var target: Bottle.ID?
 
+    private var gamePlan: (bottle: Bottle?, family: GraphicsFamily)? {
+        guard let game = entry.recipe.game else { return nil }
+        return (LauncherPlanner.steamBottle(for: game.family, in: model.bottles), game.family)
+    }
+
+    private var stepTitles: [String] {
+        let recipe = entry.recipe
+        guard let game = recipe.game, let plan = gamePlan else { return recipe.steps.map(\.title) }
+        var titles: [String] = []
+        if target == nil && plan.bottle == nil {
+            titles.append("Criar o bottle “\(plan.family.steamBottleName())” e instalar a Steam")
+        }
+        titles += recipe.steps.map(\.title)
+        titles.append("Abrir a Steam pedindo o app \(game.appid) (\(recipe.name))")
+        titles.append("Criar o atalho “\(recipe.launch?.name ?? recipe.name)” com o ícone do jogo")
+        titles.append("Mostrar o guia de próximos passos")
+        return titles
+    }
+
     var body: some View {
         let recipe = entry.recipe
+        let steamBottles = model.bottles.filter { Steam.isInstalled(in: $0) }
         VStack(alignment: .leading, spacing: 14) {
             Text("Instalar \(recipe.name)").font(.title3.bold())
 
-            Picker("Onde", selection: $target) {
-                Text("Novo bottle “\(recipe.name)”").tag(Bottle.ID?.none)
-                ForEach(model.bottles) { Text($0.name).tag(Optional($0.id)) }
+            if let plan = gamePlan {
+                Picker("Onde", selection: $target) {
+                    Text(plan.bottle.map { "Automático (\($0.name))" } ?? "Automático (novo “\(plan.family.steamBottleName())”)")
+                        .tag(Bottle.ID?.none)
+                    ForEach(steamBottles) { Text($0.name).tag(Optional($0.id)) }
+                }
+                Text("Jogos da Steam ficam num bottle de Steam compartilhado. \(recipe.name) é \(plan.family.displayName), então vai para o bottle de Steam \(plan.family.displayName). A Steam só é instalada se ainda não existir.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Picker("Onde", selection: $target) {
+                    Text("Novo bottle “\(recipe.name)”").tag(Bottle.ID?.none)
+                    ForEach(model.bottles) { Text($0.name).tag(Optional($0.id)) }
+                }
             }
 
             GroupBox("Passos") {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(recipe.steps.enumerated()), id: \.offset) { i, step in
-                        Text("\(i + 1). \(step.title)").font(.system(.callout, design: .monospaced))
+                    ForEach(Array(stepTitles.enumerated()), id: \.offset) { i, title in
+                        Text("\(i + 1). \(title)").font(.system(.callout, design: .monospaced))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

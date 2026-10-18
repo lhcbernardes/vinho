@@ -67,10 +67,16 @@ public struct RecipeRunner: Sendable {
                 } else {
                     throw RecipeError.invalid("não encontrei \(r.file)")
                 }
-                let launch = WineRunner.launchArguments(for: target)
-                let invocation = wine.invocation(launch.arguments + (r.args ?? []), in: bottle, currentDirectory: launch.currentDirectory)
-                try await execute(invocation, accepting: r.okExitCodes ?? [0, 3010], events: events)
-                try await wine.waitForServer(bottle)
+                if r.wait == false {
+                    // Abre e segue: `start` retorna assim que o programa inicia.
+                    let args = WineRunner.detachedLaunchArguments(for: target, extra: r.args ?? [])
+                    try await execute(wine.invocation(args, in: bottle), accepting: r.okExitCodes ?? [0], events: events)
+                } else {
+                    let launch = WineRunner.launchArguments(for: target)
+                    let invocation = wine.invocation(launch.arguments + (r.args ?? []), in: bottle, currentDirectory: launch.currentDirectory)
+                    try await execute(invocation, accepting: r.okExitCodes ?? [0, 3010], events: events)
+                    try await wine.waitForServer(bottle)
+                }
 
             case .winetricks(let verbs):
                 guard let winetricks = winetricksURL else { throw RecipeError.winetricksMissing }
@@ -85,7 +91,9 @@ public struct RecipeRunner: Sendable {
                 try await execute(wine.invocation(args, in: bottle), accepting: [0], events: events)
             }
         }
-        try await wine.waitForServer(bottle)
+        // Se algum passo deixou um programa aberto (wait: false), não espere o wineserver.
+        let leavesRunning = recipe.steps.contains { if case .run(let r) = $0 { return r.wait == false } else { return false } }
+        if !leavesRunning { try await wine.waitForServer(bottle) }
     }
 
     func execute(_ invocation: WineInvocation, accepting codes: [Int32], events: @escaping @Sendable (Event) -> Void) async throws {

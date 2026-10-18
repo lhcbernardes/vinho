@@ -1,18 +1,67 @@
 import Foundation
 
 public struct Program: Identifiable, Hashable, Sendable {
-    public enum Kind: String, Sendable { case executable, shortcut }
+    public enum Kind: String, Sendable { case executable, shortcut, custom }
 
     public let url: URL
     public let kind: Kind
+    /// Argumentos extras (atalhos personalizados, ex. `steam://rungameid/550`).
+    public let arguments: [String]
+    public let displayName: String?
+    /// Executável/ícone de onde extrair o ícone (padrão: `url`).
+    public let iconURL: URL?
 
-    public init(url: URL, kind: Kind) {
+    public init(url: URL, kind: Kind, arguments: [String] = [], displayName: String? = nil, iconURL: URL? = nil) {
         self.url = url
         self.kind = kind
+        self.arguments = arguments
+        self.displayName = displayName
+        self.iconURL = iconURL
     }
 
-    public var id: URL { url }
-    public var name: String { url.deletingPathExtension().lastPathComponent }
+    /// Único mesmo para dois atalhos do mesmo executável com argumentos diferentes.
+    public var id: String {
+        ([url.path] + arguments).joined(separator: "\u{1F}")
+    }
+
+    public var name: String { displayName ?? url.deletingPathExtension().lastPathComponent }
+}
+
+/// Atalho personalizado salvo no bottle (ex.: "Left 4 Dead 2" → steam.exe steam://rungameid/550).
+public struct ProgramShortcut: Codable, Hashable, Sendable {
+    public var name: String
+    /// Caminho Unix do executável.
+    public var program: String
+    public var arguments: [String]
+    /// Caminho Unix de onde tirar o ícone (opcional).
+    public var icon: String?
+    /// Jogo da Steam: exe relativo a `steamapps\common` — o ícone é achado em
+    /// qualquer biblioteca, inclusive na compartilhada.
+    public var steamGameExe: String?
+
+    public init(name: String, program: String, arguments: [String] = [], icon: String? = nil, steamGameExe: String? = nil) {
+        self.name = name
+        self.program = program
+        self.arguments = arguments
+        self.icon = icon
+        self.steamGameExe = steamGameExe
+    }
+
+    /// Resolve o ícone dinamicamente (jogos da Steam podem estar em outra biblioteca).
+    public func program(in bottle: Bottle) -> Program {
+        let iconURL = steamGameExe.flatMap { Steam.gameExecutable($0, in: bottle) } ?? icon.map { URL(fileURLWithPath: $0) }
+        return Program(url: URL(fileURLWithPath: program), kind: .custom, arguments: arguments, displayName: name, iconURL: iconURL)
+    }
+
+    public var asProgram: Program {
+        Program(
+            url: URL(fileURLWithPath: program),
+            kind: .custom,
+            arguments: arguments,
+            displayName: name,
+            iconURL: icon.map { URL(fileURLWithPath: $0) }
+        )
+    }
 }
 
 /// Encontra programas instalados num bottle: atalhos do Menu Iniciar/Desktop

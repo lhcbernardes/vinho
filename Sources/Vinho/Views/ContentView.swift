@@ -40,6 +40,9 @@ struct ContentView: View {
         .sheet(isPresented: $model.isShowingRecipes) {
             RecipesView()
         }
+        .sheet(item: $model.guide) { state in
+            GuideView(state: state)
+        }
         .overlay {
             if let message = model.busyMessage {
                 BusyOverlay(message: message)

@@ -41,13 +41,67 @@ steps:
       file: instalador.exe              # arquivo baixado acima, ou 'C:\…'
       args: ["/S"]                      # instalação silenciosa
       okExitCodes: [0, 3010]            # padrão
+  - run:
+      file: 'C:\Program Files (x86)\Steam\steam.exe'
+      args: ["steam://install/550"]
+      wait: false                       # abre e segue (programas que ficam abertos)
 
 launch:
   program: 'C:\Program Files\Notepad++\notepad++.exe'   # fixado no bottle ao final
+  # Opcionais — com qualquer um deles, vira um atalho personalizado na grade:
+  # name: Left 4 Dead 2
+  # args: ["steam://rungameid/550"]
+  # icon: 'C:\…\left4dead2.exe'     # de onde tirar o ícone
 ```
 
 Use aspas simples em caminhos do Windows (`'C:\…'`): em YAML a barra
 invertida é literal dentro de aspas simples.
+
+## Jogos da Steam
+
+Receitas de jogo **não** instalam a Steam nem baixam o jogo: elas descrevem o
+jogo e o Vinho cuida do resto.
+
+```yaml
+id: left-4-dead-2
+name: Left 4 Dead 2
+category: game
+game:
+  store: steam
+  appid: 550                                # da URL da loja: store.steampowered.com/app/550
+  exe: 'Left 4 Dead 2\left4dead2.exe'       # relativo a steamapps\common — ícone e status do download
+  directx: 9                                # 9/10/11 → bottle "Steam (DX9–11)"; 12 → "Steam (DX12)"
+  launchOptions: "-vulkan"                  # opcional: sugerido no guia, com botão de copiar
+guide:                                      # dicas extras no guia de próximos passos
+  - O download tem cerca de 13 GB.
+steps: []                                   # opcional: winetricks, registro… rodam no bottle da Steam
+```
+
+Ao instalar, o Vinho:
+
+1. procura um bottle com a Steam da família certa (**DX9–11** ou **DX12**) e, se não houver,
+   cria `Steam (DX9–11)` ou `Steam (DX12)` usando a receita que tem `provides: [steam]`;
+2. roda os `steps` do jogo (se houver) nesse bottle;
+3. abre `steam://install/<appid>` e cria o atalho com `steam://rungameid/<appid>`;
+4. mostra o **guia de próximos passos**, que se marca sozinho: login feito, biblioteca
+   compartilhada adicionada, download concluído.
+
+Jogos DX12 exigem o runtime Game Porting Toolkit (D3DMetal); o Vinho avisa se faltar.
+
+### Biblioteca compartilhada
+
+`~/Games/Vinho Steam Library` é criada automaticamente. Adicione-a nas duas Steams
+(Configurações ▸ Armazenamento) — o guia mostra o caminho `Z:\…` com botão de copiar.
+Jogos instalados ali aparecem nos dois bottles sem baixar de novo, e o atalho acha o
+ícone do jogo em qualquer biblioteca.
+
+### Backend por versão do DirectX
+
+| DirectX | Bottle | Backend |
+|---|---|---|
+| 9 | Steam (DX9–11) | WineD3D (ou `-vulkan` se o jogo trouxer DXVK) |
+| 10 / 11 | Steam (DX9–11) | DXMT |
+| 12 | Steam (DX12) | D3DMetal (Game Porting Toolkit) |
 
 ## Onde o Vinho procura receitas
 

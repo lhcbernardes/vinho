@@ -39,9 +39,15 @@ public struct Recipe: Decodable, Identifiable, Hashable, Sendable {
     public var requires: Requirements?
     public var steps: [RecipeStep]
     public var launch: LaunchSpec?
+    /// Jogo instalado por uma loja (Steam): o Vinho escolhe/cria o bottle da loja.
+    public var game: GameSpec?
+    /// O que esta receita oferece a outras (ex.: `[steam]`).
+    public var provides: [String]
+    /// Dicas extras exibidas no guia de próximos passos.
+    public var guide: [String]?
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, revision, category, homepage, notes, bottle, requires, steps, launch
+        case id, name, revision, category, homepage, notes, bottle, requires, steps, launch, game, provides, guide
         case summary = "description"
     }
 
@@ -56,8 +62,11 @@ public struct Recipe: Decodable, Identifiable, Hashable, Sendable {
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         bottle = try c.decodeIfPresent(BottlePreset.self, forKey: .bottle)
         requires = try c.decodeIfPresent(Requirements.self, forKey: .requires)
-        steps = try c.decode([RecipeStep].self, forKey: .steps)
+        steps = try c.decodeIfPresent([RecipeStep].self, forKey: .steps) ?? []
         launch = try c.decodeIfPresent(LaunchSpec.self, forKey: .launch)
+        game = try c.decodeIfPresent(GameSpec.self, forKey: .game)
+        provides = try c.decodeIfPresent([String].self, forKey: .provides) ?? []
+        guide = try c.decodeIfPresent([String].self, forKey: .guide)
     }
 
     // MARK: Parse + validação
@@ -92,7 +101,19 @@ public struct Recipe: Decodable, Identifiable, Hashable, Sendable {
             throw RecipeError.invalid("id inválido \"\(id)\" (use letras minúsculas, números e hífen)")
         }
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { throw RecipeError.invalid("name vazio") }
-        guard !steps.isEmpty else { throw RecipeError.invalid("receita sem steps") }
+        guard !steps.isEmpty || game != nil else { throw RecipeError.invalid("receita sem steps") }
+        if let game {
+            guard game.appid > 0 else { throw RecipeError.invalid("game.appid inválido") }
+            if let exe = game.exe {
+                let parts = exe.replacingOccurrences(of: "\\", with: "/").split(separator: "/")
+                guard !parts.isEmpty, !parts.contains(".."), !exe.contains(":") else {
+                    throw RecipeError.invalid("game.exe deve ser relativo a steamapps\\common")
+                }
+            }
+            if let dx = game.directx, ![9, 10, 11, 12].contains(dx) {
+                throw RecipeError.invalid("game.directx deve ser 9, 10, 11 ou 12")
+            }
+        }
 
         var files = Set<String>()
         for step in steps {
@@ -131,6 +152,9 @@ public struct Recipe: Decodable, Identifiable, Hashable, Sendable {
         if let program = launch?.program, !WindowsPath.looksLikeWindowsPath(program) {
             throw RecipeError.invalid("launch.program precisa ser um caminho C:\\…")
         }
+        if let icon = launch?.icon, !WindowsPath.looksLikeWindowsPath(icon) {
+            throw RecipeError.invalid("launch.icon precisa ser um caminho C:\\…")
+        }
     }
 }
 
@@ -143,6 +167,16 @@ public struct BottlePreset: Decodable, Hashable, Sendable {
     public var retina: Bool?
     public var environment: [String: String]?
     public var dllOverrides: [String: String]?
+
+    public init(windows: WindowsVersion? = nil, graphics: GraphicsBackend? = nil, sync: SyncMode? = nil,
+                retina: Bool? = nil, environment: [String: String]? = nil, dllOverrides: [String: String]? = nil) {
+        self.windows = windows
+        self.graphics = graphics
+        self.sync = sync
+        self.retina = retina
+        self.environment = environment
+        self.dllOverrides = dllOverrides
+    }
 
     /// Aplica o preset sobre as configurações de um bottle.
     public func apply(to settings: inout BottleSettings) {
@@ -157,6 +191,26 @@ public struct BottlePreset: Decodable, Hashable, Sendable {
     }
 }
 
+/// Jogo distribuído por uma loja.
+///
+/// ```yaml
+/// game:
+///   store: steam
+///   appid: 550
+///   exe: 'Left 4 Dead 2\left4dead2.exe'   # relativo a steamapps\common (para o ícone e o status)
+///   directx: 9                             # escolhe o bottle DX9–11 ou DX12
+///   launchOptions: "-vulkan"               # sugerido no guia
+/// ```
+public struct GameSpec: Decodable, Hashable, Sendable {
+    public var store: GameStore
+    public var appid: Int
+    public var exe: String?
+    public var directx: Int?
+    public var launchOptions: String?
+
+    public var family: GraphicsFamily { GraphicsFamily(directX: directx) }
+}
+
 public struct Requirements: Decodable, Hashable, Sendable {
     /// Ex.: `[dxmt]` — o runtime precisa ter estas camadas.
     public var capabilities: [RuntimeCapability]?
@@ -166,6 +220,10 @@ public struct LaunchSpec: Decodable, Hashable, Sendable {
     /// Caminho do Windows, ex. `C:\Program Files\App\app.exe`.
     public var program: String
     public var args: [String]?
+    /// Nome do atalho na grade (padrão: nome do executável).
+    public var name: String?
+    /// Caminho do Windows de onde tirar o ícone (ex. o .exe do jogo).
+    public var icon: String?
 }
 
 public struct DownloadStep: Decodable, Hashable, Sendable {
@@ -184,6 +242,8 @@ public struct RunStep: Decodable, Hashable, Sendable {
     public var args: [String]?
     /// Códigos de saída aceitos (padrão 0 e 3010 = "reinicie o Windows").
     public var okExitCodes: [Int32]?
+    /// `false`: abre e segue sem esperar (ex.: Steam, que fica aberta). Padrão `true`.
+    public var wait: Bool?
 }
 
 public struct RegistryStep: Decodable, Hashable, Sendable {

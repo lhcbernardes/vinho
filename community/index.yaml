@@ -5,3 +5,4 @@ recipes:
   - recipes/7zip.yaml
   - recipes/notepad-plus-plus.yaml
   - recipes/steam.yaml
+  - recipes/left-4-dead-2.yaml

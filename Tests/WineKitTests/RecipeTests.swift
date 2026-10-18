@@ -28,7 +28,7 @@ final class RecordingLauncher: ProcessLaunching, @unchecked Sendable {
 final class RecipeParsingTests: XCTestCase {
     func testBuiltInRecipesAreValid() {
         let entries = RecipeLibrary.builtIn()
-        XCTAssertEqual(Set(entries.map(\.id)), ["notepad-plus-plus", "7zip", "steam"])
+        XCTAssertEqual(Set(entries.map(\.id)), ["notepad-plus-plus", "7zip", "steam", "left-4-dead-2"])
         let npp = entries.first { $0.id == "notepad-plus-plus" }!.recipe
         XCTAssertTrue(npp.isVerified)
         XCTAssertEqual(npp.launch?.program, #"C:\Program Files\Notepad++\notepad++.exe"#)
@@ -233,7 +233,7 @@ final class RecipeLibraryTests: XCTestCase {
         let merged = RecipeLibrary.merge([RecipeLibrary.builtIn(), remote.entries, local.entries])
         XCTAssertEqual(merged.first { $0.id == "7zip" }?.recipe.name, "7-Zip (minha)")
         XCTAssertEqual(merged.first { $0.id == "jogo" }?.source.label, "Comunidade")
-        XCTAssertEqual(Set(merged.map(\.id)), ["7zip", "notepad-plus-plus", "steam", "jogo"])
+        XCTAssertEqual(Set(merged.map(\.id)), ["7zip", "notepad-plus-plus", "steam", "left-4-dead-2", "jogo"])
     }
 }
 
@@ -298,5 +298,190 @@ final class CompatibilityReportTests: XCTestCase {
         let back = try BottleManager.decoder.decode(BottleSettings.self, from: BottleManager.encoder.encode(s))
         XCTAssertEqual(back.compatibility["/x/steam.exe"], .perfect)
         XCTAssertEqual(back.installedRecipes["steam"], 2)
+    }
+}
+
+
+final class ShortcutAndDetachedRunTests: XCTestCase {
+    func testLeft4Dead2IsASteamGameRecipe() throws {
+        let recipe = try XCTUnwrap(RecipeLibrary.builtIn().first { $0.id == "left-4-dead-2" }?.recipe)
+        let game = try XCTUnwrap(recipe.game)
+        XCTAssertEqual(game.store, .steam)
+        XCTAssertEqual(game.appid, 550)
+        XCTAssertEqual(game.family, .classic, "DX9 vai para o bottle DX9–11")
+        XCTAssertTrue(recipe.steps.isEmpty, "a Steam vem da receita que a fornece, não do jogo")
+        XCTAssertFalse(recipe.guide?.isEmpty ?? true)
+        XCTAssertTrue(RecipeLibrary.builtIn().contains { $0.recipe.provides.contains("steam") })
+    }
+
+    func testDetachedRunUsesStartAndSkipsWaitingForServer() async throws {
+        let work = FileManager.default.temporaryDirectory.appendingPathComponent("vinho-detach-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let bottle = Bottle(url: work.appendingPathComponent("b"), settings: BottleSettings(name: "b"))
+        let steam = bottle.driveC.appendingPathComponent("Program Files (x86)/Steam/steam.exe")
+        try FileManager.default.createDirectory(at: steam.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: steam.path, contents: Data())
+
+        let recipe = try Recipe.parse("""
+        id: abre-steam
+        name: x
+        steps:
+          - run: { file: 'C:\\Program Files (x86)\\Steam\\steam.exe', args: ["steam://install/550"], wait: false }
+        """)
+        let launcher = RecordingLauncher()
+        let runtime = WineRuntime(id: "rt", rootURL: URL(fileURLWithPath: "/opt/wine"), capabilities: [])
+        try await RecipeRunner(runtime: runtime, launcher: launcher,
+                               downloader: LocalFileDownloader(source: work),
+                               cacheDirectory: work.appendingPathComponent("cache"), winetricksURL: nil)
+            .run(recipe, in: bottle)
+
+        XCTAssertEqual(launcher.invocations.count, 1, "sem wineserver -w: a Steam continua aberta")
+        XCTAssertEqual(launcher.invocations[0].arguments, ["start", "/unix", steam.path, "steam://install/550"])
+    }
+
+    func testShortcutProgramsHaveDistinctIDsAndArguments() {
+        let exe = URL(fileURLWithPath: "/b/drive_c/Steam/steam.exe")
+        let plain = Program(url: exe, kind: .executable)
+        let l4d2 = ProgramShortcut(name: "Left 4 Dead 2", program: exe.path,
+                                   arguments: ["steam://rungameid/550"], icon: "/b/l4d2.exe").asProgram
+        XCTAssertNotEqual(plain.id, l4d2.id)
+        XCTAssertEqual(l4d2.name, "Left 4 Dead 2")
+        XCTAssertEqual(l4d2.iconURL?.path, "/b/l4d2.exe")
+        XCTAssertEqual(WineRunner.launchArguments(for: l4d2).arguments, [exe.path, "steam://rungameid/550"])
+    }
+
+    func testSettingsPersistShortcuts() throws {
+        var s = BottleSettings(name: "b")
+        s.shortcuts = [ProgramShortcut(name: "L4D2", program: "/x/steam.exe", arguments: ["-a"])]
+        let back = try BottleManager.decoder.decode(BottleSettings.self, from: BottleManager.encoder.encode(s))
+        XCTAssertEqual(back.shortcuts, s.shortcuts)
+    }
+}
+
+
+final class SteamAndGuideTests: XCTestCase {
+    private var root: URL!
+    private let fm = FileManager.default
+
+    override func setUpWithError() throws {
+        root = fm.temporaryDirectory.appendingPathComponent("vinho-steam-\(UUID().uuidString)")
+    }
+
+    override func tearDownWithError() throws {
+        try? fm.removeItem(at: root)
+    }
+
+    private func write(_ text: String, _ url: URL) throws {
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func bottle(_ name: String, graphics: GraphicsBackend = .dxmt, steam: Bool) throws -> Bottle {
+        let b = Bottle(url: root.appendingPathComponent(name), settings: BottleSettings(name: name, graphics: graphics))
+        if steam { try write("", Steam.executable(in: b)) }
+        return b
+    }
+
+    func testGraphicsFamily() {
+        XCTAssertEqual(GraphicsFamily(directX: 9), .classic)
+        XCTAssertEqual(GraphicsFamily(directX: 11), .classic)
+        XCTAssertEqual(GraphicsFamily(directX: 12), .dx12)
+        XCTAssertEqual(GraphicsFamily(directX: nil), .classic)
+        XCTAssertEqual(GraphicsFamily.dx12.preferredBackend, .d3dMetal)
+        XCTAssertEqual(GraphicsFamily.classic.steamBottleName(), "Steam (DX9–11)")
+    }
+
+    func testPlannerPicksSteamBottleOfTheRightFamily() throws {
+        let noSteam = try bottle("Office", steam: false)
+        let classic = try bottle("Steam", steam: true)
+        let dx12 = try bottle("Steam DX12", graphics: .d3dMetal, steam: true)
+        let all = [noSteam, classic, dx12]
+        XCTAssertEqual(LauncherPlanner.steamBottle(for: .classic, in: all)?.name, "Steam")
+        XCTAssertEqual(LauncherPlanner.steamBottle(for: .dx12, in: all)?.name, "Steam DX12")
+        XCTAssertNil(LauncherPlanner.steamBottle(for: .dx12, in: [noSteam, classic]))
+    }
+
+    func testLibraryFoldersParsingAndGameLookupInSecondaryLibrary() throws {
+        let b = try bottle("Steam", steam: true)
+        let vdf = #"""
+        "libraryfolders"
+        {
+            "0"
+            {
+                "path"		"C:\\Program Files (x86)\\Steam"
+            }
+            "1"
+            {
+                "path"		"C:\\Jogos\\SteamLibrary"
+            }
+        }
+        """#
+        try write(vdf, Steam.directory(in: b).appendingPathComponent("steamapps/libraryfolders.vdf"))
+        XCTAssertEqual(Steam.libraryPaths(in: b), [#"C:\Program Files (x86)\Steam"#, #"C:\Jogos\SteamLibrary"#])
+
+        XCTAssertNil(Steam.gameExecutable(#"Left 4 Dead 2\left4dead2.exe"#, in: b))
+        let exe = b.driveC.appendingPathComponent("Jogos/SteamLibrary/steamapps/common/Left 4 Dead 2/left4dead2.exe")
+        try write("", exe)
+        XCTAssertEqual(Steam.gameExecutable(#"Left 4 Dead 2\left4dead2.exe"#, in: b)?.path, exe.path)
+    }
+
+    func testSteamGuideTicksItselfOff() throws {
+        let b = try bottle("Steam", steam: true)
+        let shared = b.driveC.appendingPathComponent("Shared Library")
+
+        var items = GuideBuilder.steam(bottle: b, sharedLibrary: shared)
+        XCTAssertEqual(items.first { $0.id == "steam-installed" }?.status, .done)
+        XCTAssertEqual(items.first { $0.id == "steam-login" }?.status, .todo)
+        XCTAssertEqual(items.first { $0.id == "steam-library" }?.status, .todo)
+        XCTAssertEqual(items.first { $0.id == "steam-library" }?.action, .copy(#"C:\Shared Library"#))
+        XCTAssertEqual(GuideBuilder.pendingCount(items), 2)
+
+        try write(#""users" { "1" { "AccountName" "leandro" } }"#,
+                  Steam.directory(in: b).appendingPathComponent("config/loginusers.vdf"))
+        try write(#""libraryfolders" { "1" { "path" "C:\\Shared Library" } }"#,
+                  Steam.directory(in: b).appendingPathComponent("steamapps/libraryfolders.vdf"))
+
+        items = GuideBuilder.steam(bottle: b, sharedLibrary: shared)
+        XCTAssertEqual(items.first { $0.id == "steam-login" }?.status, .done)
+        XCTAssertEqual(items.first { $0.id == "steam-library" }?.status, .done)
+        XCTAssertEqual(GuideBuilder.pendingCount(items), 0)
+    }
+
+    func testGameGuideCompletesWhenDownloadFinishes() throws {
+        let b = try bottle("Steam", steam: true)
+        let recipe = try XCTUnwrap(RecipeLibrary.builtIn().first { $0.id == "left-4-dead-2" }?.recipe)
+
+        var items = GuideBuilder.game(recipe, bottle: b)
+        XCTAssertEqual(items.first { $0.id == "game-confirm" }?.action, .openSteam("steam://install/550"))
+        XCTAssertEqual(items.first { $0.id == "game-download" }?.status, .todo)
+        XCTAssertNil(items.first { $0.id == "game-play" }?.action)
+        XCTAssertEqual(GuideBuilder.pendingCount(items), 1)
+        XCTAssertEqual(items.filter { $0.id.hasPrefix("recipe-tip") }.count, recipe.guide?.count)
+
+        try write("", Steam.directory(in: b).appendingPathComponent("steamapps/common/Left 4 Dead 2/left4dead2.exe"))
+        items = GuideBuilder.game(recipe, bottle: b)
+        XCTAssertEqual(items.first { $0.id == "game-download" }?.status, .done)
+        XCTAssertEqual(items.first { $0.id == "game-play" }?.action, .launchShortcut("Left 4 Dead 2"))
+        XCTAssertEqual(GuideBuilder.pendingCount(items), 0)
+    }
+
+    func testSteamShortcutResolvesIconFromAnyLibrary() throws {
+        let b = try bottle("Steam", steam: true)
+        let shortcut = ProgramShortcut(name: "Left 4 Dead 2", program: Steam.executable(in: b).path,
+                                       arguments: [Steam.runURL(appID: 550)],
+                                       steamGameExe: #"Left 4 Dead 2\left4dead2.exe"#)
+        XCTAssertNil(shortcut.program(in: b).iconURL, "ainda baixando")
+        let exe = Steam.directory(in: b).appendingPathComponent("steamapps/common/Left 4 Dead 2/left4dead2.exe")
+        try write("", exe)
+        XCTAssertEqual(shortcut.program(in: b).iconURL?.path, exe.path)
+        XCTAssertEqual(shortcut.program(in: b).arguments, ["steam://rungameid/550"])
+    }
+
+    func testGameRecipeValidation() {
+        XCTAssertNoThrow(try Recipe.parse("id: g\nname: G\ngame: { store: steam, appid: 10, directx: 11 }"))
+        XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: steam, appid: 0 }"))
+        XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: steam, appid: 10, exe: '..\\x.exe' }"))
+        XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: steam, appid: 10, directx: 8 }"))
+        XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: origin, appid: 10 }"))
     }
 }

@@ -99,6 +99,12 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] Pasta `community/` pronta para virar repositório — formato em [`docs/RECEITAS.md`](docs/RECEITAS.md)
 - [x] Relatórios de compatibilidade ("Funcionou?") como issues pré-preenchidas no GitHub
 
+**Launchers e jogos** ✅
+- [x] Receitas de jogo (`game: { store: steam, appid, directx }`) instaladas no bottle de Steam certo (DX9–11 ou DX12), criado sob demanda
+- [x] Biblioteca de jogos compartilhada entre os bottles de Steam
+- [x] Guia "Próximos passos" que se marca sozinho (login, biblioteca, download) e aviso no bottle quando há pendências
+- [x] Detecção da Steam instalada manualmente (arrastando o SteamSetup.exe)
+
 **Fase 5 — Comunidade** ✅
 - [x] CI (GitHub Actions) com testes e validação das receitas de `community/`
 - [x] Release automático do `Vinho.app` ao criar uma tag `v*`

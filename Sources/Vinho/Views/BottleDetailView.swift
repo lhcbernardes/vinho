@@ -24,6 +24,7 @@ struct BottleDetailView: View {
 
         VStack(spacing: 0) {
             header
+            GuideBanner(bottle: bottle)
             Divider()
             switch tab {
             case .programs: ProgramsGrid(bottle: bottle)
@@ -46,6 +47,13 @@ struct BottleDetailView: View {
                     Label("Executar…", systemImage: "play.fill")
                 }
                 .help("Executar um .exe, .msi ou .lnk neste bottle")
+
+                if Steam.isInstalled(in: bottle) {
+                    Button { model.guide = GuideState(kind: .steam, bottleID: bottle.id) } label: {
+                        Label("Guia da Steam", systemImage: "list.bullet.clipboard")
+                    }
+                    .help("Próximos passos: login, biblioteca compartilhada e dicas")
+                }
 
                 Menu {
                     Button("Configuração do Wine (winecfg)") { model.runTool("winecfg", in: bottle) }
@@ -134,7 +142,7 @@ private struct ProgramsGrid: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 16)], spacing: 16) {
                     ForEach(model.programs) { program in
-                        Button { model.launch(program.url, in: bottle) } label: {
+                        Button { model.launch(program, in: bottle) } label: {
                             VStack(spacing: 8) {
                                 ProgramIconView(program: program, bottle: bottle)
                                     .overlay(alignment: .topTrailing) {
@@ -152,10 +160,14 @@ private struct ProgramsGrid: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help(WindowsPath.from(program.url, in: bottle))
+                        .help(([WindowsPath.from(program.url, in: bottle)] + program.arguments).joined(separator: " "))
                         .contextMenu {
-                            Button("Executar") { model.launch(program.url, in: bottle) }
-                            Button("Fixar") { Task { await model.pin(program.url, in: bottle) } }
+                            Button("Executar") { model.launch(program, in: bottle) }
+                            if program.kind == .custom {
+                                Button("Remover atalho") { Task { await model.removeShortcut(program, from: bottle) } }
+                            } else {
+                                Button("Fixar") { Task { await model.pin(program.url, in: bottle) } }
+                            }
                             Button("Criar atalho no Launchpad") { model.createShortcut(for: program, in: bottle) }
                             Divider()
                             Button("Funcionou? Avaliar…") { model.reporting = program }

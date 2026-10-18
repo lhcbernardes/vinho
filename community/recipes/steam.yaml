@@ -1,8 +1,9 @@
 id: steam
 name: Steam
-revision: 1
+revision: 2
 category: game
 description: Loja e biblioteca de jogos da Valve.
+provides: [steam]
 homepage: https://store.steampowered.com
 notes: Se a janela da Steam ficar preta, troque o backend gráfico para WineD3D.
 bottle:

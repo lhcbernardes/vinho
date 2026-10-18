@@ -4,6 +4,16 @@ import Observation
 import UniformTypeIdentifiers
 import WineKit
 
+struct GuideState: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case steam
+        case game(recipeID: String)
+    }
+    let kind: Kind
+    let bottleID: Bottle.ID
+    var id: String { "\(bottleID.path)|\(kind)" }
+}
+
 struct RecipeRunState: Equatable {
     var recipeName: String
     var bottleID: Bottle.ID
@@ -59,6 +69,9 @@ final class AppModel {
 
     /// Programa sendo avaliado (abre a folha "Funcionou?").
     var reporting: Program?
+
+    /// Guia "Próximos passos" aberto.
+    var guide: GuideState?
 
     var snapshots: [Bottle.ID: [BottleSnapshot]] = [:]
     private let snapshotManager = SnapshotManager()
@@ -119,13 +132,32 @@ final class AppModel {
 
     func rescanPrograms() {
         guard let bottle = selectedBottle else { programs = []; return }
-        let pinned = bottle.settings.pinnedPrograms.map { URL(fileURLWithPath: $0) }
-        let scanned = ProgramScanner.scan(bottle)
-        let pinnedPrograms = pinned
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        let fm = FileManager.default
+        let custom = bottle.settings.shortcuts
+            .filter { fm.fileExists(atPath: $0.program) }
+            .map { $0.program(in: bottle) }
+        let pinned = bottle.settings.pinnedPrograms
+            .map { URL(fileURLWithPath: $0) }
+            .filter { fm.fileExists(atPath: $0.path) }
             .map { Program(url: $0, kind: $0.pathExtension.lowercased() == "lnk" ? .shortcut : .executable) }
-        var seen = Set<URL>()
-        programs = (pinnedPrograms + scanned).filter { seen.insert($0.url).inserted }
+        var seen = Set<String>()
+        programs = (custom + pinned + ProgramScanner.scan(bottle)).filter { seen.insert($0.id).inserted }
+    }
+
+    func addShortcut(_ shortcut: ProgramShortcut, to bottle: Bottle) async {
+        await update(bottle) { s in
+            s.shortcuts.removeAll { $0.name == shortcut.name }
+            s.shortcuts.insert(shortcut, at: 0)
+        }
+        rescanPrograms()
+    }
+
+    func removeShortcut(_ program: Program, from bottle: Bottle) async {
+        await update(bottle) { s in
+            s.shortcuts.removeAll { $0.asProgram.id == program.id }
+            s.pinnedPrograms.removeAll { $0 == program.url.path }
+        }
+        rescanPrograms()
     }
 
     // MARK: Bottles
@@ -322,10 +354,14 @@ final class AppModel {
 
     // MARK: Execução
 
-    func launch(_ program: URL, in bottle: Bottle) {
-        if autoSnapshotInstallers && Self.looksLikeInstaller(program) {
+    func launch(_ url: URL, in bottle: Bottle) {
+        launch(Program(url: url, kind: .executable), in: bottle)
+    }
+
+    func launch(_ program: Program, in bottle: Bottle) {
+        if autoSnapshotInstallers && program.arguments.isEmpty && Self.looksLikeInstaller(program.url) {
             Task {
-                await createSnapshot(bottle, label: "Antes de \(program.lastPathComponent)")
+                await createSnapshot(bottle, label: "Antes de \(program.url.lastPathComponent)")
                 launchNow(program, in: bottle)
             }
         } else {
@@ -333,9 +369,9 @@ final class AppModel {
         }
     }
 
-    private func launchNow(_ program: URL, in bottle: Bottle) {
+    private func launchNow(_ program: Program, in bottle: Bottle) {
         let (args, cwd) = WineRunner.launchArguments(for: program)
-        run(args, in: bottle, currentDirectory: cwd, label: program.lastPathComponent)
+        run(args, in: bottle, currentDirectory: cwd, label: program.name)
     }
 
     static func looksLikeInstaller(_ url: URL) -> Bool {
@@ -482,50 +518,210 @@ final class AppModel {
     /// Instala uma receita num bottle novo (target nil) ou existente.
     func install(_ entry: RecipeEntry, into target: Bottle?) {
         guard recipeRun == nil else { return }
-        let recipe = entry.recipe
         isShowingRecipes = false
-
         recipeTask = Task {
-            var chosen = target
-            if chosen == nil {
-                let name = uniqueBottleName(recipe.name)
-                chosen = await createBottle(
-                    name: name,
-                    windows: recipe.bottle?.windows ?? .win10,
-                    graphics: recipe.bottle?.graphics ?? .dxmt,
-                    preset: recipe.bottle
-                )
-            } else if let b = chosen, autoSnapshotInstallers {
-                await createSnapshot(b, label: "Antes de \(recipe.name)")
-            }
-            guard let bottle = chosen, let runtime = runtime(for: bottle) else { recipeTask = nil; return }
-
-            recipeRun = RecipeRunState(recipeName: recipe.name, bottleID: bottle.id)
-            selection = bottle.id
-            log(bottle.id, "🍷 Receita: \(recipe.name)\(recipe.isVerified ? "" : " (não verificada)")")
-
-            let id = bottle.id
-            do {
-                try await RecipeRunner(runtime: runtime).run(recipe, in: bottle) { event in
-                    Task { @MainActor [weak self] in self?.handle(event, bottle: id) }
-                }
-                await update(bottle) { $0.installedRecipes[recipe.id] = recipe.revision ?? 1 }
-                if let program = recipe.launch?.program, let url = WindowsPath.toUnix(program, in: bottle),
-                   FileManager.default.fileExists(atPath: url.path) {
-                    await pin(url, in: bottle)
-                }
-                log(id, "✅ \(recipe.name) instalado.")
-                if let notes = recipe.notes { log(id, "ℹ️ \(notes)") }
-            } catch is CancellationError {
-                log(id, "Instalação cancelada.")
-            } catch {
-                log(id, "❌ \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
-                show(error)
+            if let game = entry.recipe.game {
+                await installGame(entry.recipe, game: game, preferred: target)
+            } else {
+                await installRegular(entry.recipe, into: target)
             }
             recipeRun = nil
             recipeTask = nil
             rescanPrograms()
         }
+    }
+
+    /// Receita comum: cria/usa bottle, roda os passos, cria atalho.
+    @discardableResult
+    private func installRegular(_ recipe: Recipe, into target: Bottle?, bottleName: String? = nil,
+                                graphics: GraphicsBackend? = nil) async -> Bottle? {
+        var chosen = target
+        if chosen == nil {
+            var preset = recipe.bottle ?? BottlePreset()
+            if let graphics { preset.graphics = graphics }
+            chosen = await createBottle(
+                name: bottleName ?? uniqueBottleName(recipe.name),
+                windows: preset.windows ?? .win10,
+                graphics: preset.graphics ?? .dxmt,
+                preset: preset
+            )
+        } else if let b = chosen, autoSnapshotInstallers {
+            await createSnapshot(b, label: "Antes de \(recipe.name)")
+        }
+        guard let bottle = chosen else { return nil }
+
+        do {
+            try await runSteps(of: recipe, in: bottle)
+            await update(bottle) { $0.installedRecipes[recipe.id] = recipe.revision ?? 1 }
+            if let launch = recipe.launch, let url = WindowsPath.toUnix(launch.program, in: bottle) {
+                let hasExtras = launch.name != nil || launch.icon != nil || !(launch.args ?? []).isEmpty
+                if hasExtras {
+                    let icon = launch.icon.flatMap { WindowsPath.toUnix($0, in: bottle)?.path }
+                    await addShortcut(ProgramShortcut(
+                        name: launch.name ?? recipe.name, program: url.path,
+                        arguments: launch.args ?? [], icon: icon
+                    ), to: bottle)
+                } else if FileManager.default.fileExists(atPath: url.path) {
+                    await pin(url, in: bottle)
+                }
+            }
+            log(bottle.id, "✅ \(recipe.name) instalado.")
+            if let notes = recipe.notes { log(bottle.id, "ℹ️ \(notes)") }
+            if recipe.provides.contains("steam") {
+                ensureSharedLibrary()
+                guide = GuideState(kind: .steam, bottleID: bottle.id)
+            }
+            return bottle
+        } catch is CancellationError {
+            log(bottle.id, "Instalação cancelada.")
+        } catch {
+            log(bottle.id, "❌ \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+            show(error)
+        }
+        return nil
+    }
+
+    /// Jogo de loja: acha (ou cria) o bottle de Steam da família certa,
+    /// pede a instalação na Steam e cria o atalho com o ícone do jogo.
+    private func installGame(_ recipe: Recipe, game: GameSpec, preferred: Bottle?) async {
+        let family = game.family
+
+        if family == .dx12 && !runtimes.contains(where: { $0.supports(.d3dMetal) }) {
+            errorMessage = """
+            \(recipe.name) é DirectX 12 e precisa do Game Porting Toolkit (D3DMetal).
+            Instale com: brew install --cask gcenx/wine/game-porting-toolkit
+            Depois clique em “Procurar de novo” em Ajustes ▸ Runtimes.
+            """
+            return
+        }
+
+        var bottle: Bottle?
+        if let preferred, Steam.isInstalled(in: preferred) {
+            bottle = preferred
+        } else if preferred == nil {
+            bottle = LauncherPlanner.steamBottle(for: family, in: bottles)
+        }
+
+        if bottle == nil {
+            guard let steam = (recipes + RecipeLibrary.builtIn()).first(where: { $0.recipe.provides.contains("steam") })?.recipe else {
+                errorMessage = "Nenhuma receita fornece a Steam."
+                return
+            }
+            log(preferred?.id ?? URL(fileURLWithPath: "/"), "Instalando a Steam primeiro…")
+            bottle = await installRegular(
+                steam, into: preferred,
+                bottleName: preferred == nil ? uniqueBottleName(family.steamBottleName()) : nil,
+                graphics: family.preferredBackend
+            )
+        }
+        guard let bottle, Steam.isInstalled(in: bottle) else {
+            if bottle != nil { errorMessage = "A Steam não foi encontrada no bottle depois da instalação." }
+            return
+        }
+
+        if GraphicsFamily(bottle: bottle) != family {
+            log(bottle.id, "⚠️ \(recipe.name) é \(family.displayName), mas este bottle é \(GraphicsFamily(bottle: bottle).displayName).")
+        }
+
+        do {
+            if !recipe.steps.isEmpty { try await runSteps(of: recipe, in: bottle) }
+        } catch {
+            show(error)
+            return
+        }
+
+        let steamExe = Steam.executable(in: bottle)
+        await addShortcut(ProgramShortcut(
+            name: recipe.launch?.name ?? recipe.name,
+            program: steamExe.path,
+            arguments: [Steam.runURL(appID: game.appid)],
+            steamGameExe: game.exe
+        ), to: bottle)
+        await update(bottle) { $0.installedRecipes[recipe.id] = recipe.revision ?? 1 }
+
+        selection = bottle.id
+        ensureSharedLibrary()
+        log(bottle.id, "🎮 Pedindo à Steam para instalar \(recipe.name) (app \(game.appid))…")
+        openSteam(in: bottle, url: Steam.installURL(appID: game.appid))
+        guide = GuideState(kind: .game(recipeID: recipe.id), bottleID: bottle.id)
+    }
+
+    /// Roda os passos de uma receita com progresso no banner.
+    private func runSteps(of recipe: Recipe, in bottle: Bottle) async throws {
+        guard let runtime = runtime(for: bottle) else { throw WineError.noRuntimeAvailable }
+        recipeRun = RecipeRunState(recipeName: recipe.name, bottleID: bottle.id)
+        selection = bottle.id
+        log(bottle.id, "🍷 Receita: \(recipe.name)\(recipe.isVerified ? "" : " (não verificada)")")
+        let id = bottle.id
+        defer { recipeRun = nil }
+        try await RecipeRunner(runtime: runtime).run(recipe, in: bottle) { event in
+            Task { @MainActor [weak self] in self?.handle(event, bottle: id) }
+        }
+    }
+
+    // MARK: Guia / launchers
+
+    func recipe(withID id: String) -> Recipe? {
+        (recipes + RecipeLibrary.builtIn()).first { $0.id == id }?.recipe
+    }
+
+    /// Itens do guia, recalculados a partir do disco (o checklist se marca sozinho).
+    func guideItems(for state: GuideState) -> [GuideItem] {
+        guard let bottle = bottles.first(where: { $0.id == state.bottleID }) else { return [] }
+        switch state.kind {
+        case .steam:
+            return GuideBuilder.steam(bottle: bottle)
+        case .game(let recipeID):
+            guard let recipe = recipe(withID: recipeID) else { return [] }
+            // Login é pré-requisito: mostra no topo enquanto não estiver feito.
+            let login = GuideBuilder.steam(bottle: bottle).filter { $0.id == "steam-login" && $0.status == .todo }
+            return login + GuideBuilder.game(recipe, bottle: bottle)
+        }
+    }
+
+    /// Guias com passos pendentes neste bottle (Steam + jogos instalados por receita).
+    func pendingGuides(for bottle: Bottle) -> [(GuideState, Int)] {
+        var result: [(GuideState, Int)] = []
+        if Steam.isInstalled(in: bottle) {
+            let state = GuideState(kind: .steam, bottleID: bottle.id)
+            let pending = GuideBuilder.pendingCount(guideItems(for: state))
+            if pending > 0 { result.append((state, pending)) }
+        }
+        for recipeID in bottle.settings.installedRecipes.keys.sorted() {
+            guard recipe(withID: recipeID)?.game != nil else { continue }
+            let state = GuideState(kind: .game(recipeID: recipeID), bottleID: bottle.id)
+            let pending = GuideBuilder.pendingCount(guideItems(for: state).filter { $0.id.hasPrefix("game-") })
+            if pending > 0 { result.append((state, pending)) }
+        }
+        return result
+    }
+
+    func perform(_ action: GuideItem.Action, bottleID: Bottle.ID) {
+        guard let bottle = bottles.first(where: { $0.id == bottleID }) else { return }
+        switch action {
+        case .openSteam(let url):
+            openSteam(in: bottle, url: url)
+        case .copy(let text):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        case .revealFolder(let folder):
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(folder)
+        case .launchShortcut(let name):
+            if let program = programs.first(where: { $0.name == name }) {
+                launch(program, in: bottle)
+            }
+        }
+    }
+
+    /// Abre a Steam do bottle sem esperar (ela fica aberta).
+    func openSteam(in bottle: Bottle, url: String? = nil) {
+        let args = WineRunner.detachedLaunchArguments(for: Steam.executable(in: bottle), extra: url.map { [$0] } ?? [])
+        run(args, in: bottle, currentDirectory: nil, label: "Steam")
+    }
+
+    func ensureSharedLibrary() {
+        try? FileManager.default.createDirectory(at: VinhoPaths.sharedSteamLibrary, withIntermediateDirectories: true)
     }
 
     func cancelRecipe() {
@@ -563,7 +759,7 @@ final class AppModel {
     }
 
     func rating(for program: Program, in bottle: Bottle) -> CompatibilityRating? {
-        bottle.settings.compatibility[program.url.path]
+        bottle.settings.compatibility[program.id]
     }
 
     func makeReport(for program: Program, in bottle: Bottle, rating: CompatibilityRating, notes: String) -> CompatibilityReport {
@@ -585,7 +781,7 @@ final class AppModel {
 
     /// Guarda a nota localmente e, se pedido, abre a issue pré-preenchida.
     func submit(_ report: CompatibilityReport, program: Program, in bottle: Bottle, openGitHub: Bool) async {
-        await update(bottle) { $0.compatibility[program.url.path] = report.rating }
+        await update(bottle) { $0.compatibility[program.id] = report.rating }
         if openGitHub {
             if let url = report.issueURL(repository: communityRepo) {
                 NSWorkspace.shared.open(url)
@@ -604,13 +800,13 @@ final class AppModel {
 
     func createShortcut(for program: Program, in bottle: Bottle) {
         guard let runtime = runtime(for: bottle) else { return show(WineError.noRuntimeAvailable) }
-        let (args, cwd) = WineRunner.launchArguments(for: program.url)
+        let (args, cwd) = WineRunner.launchArguments(for: program)
         let invocation = WineRunner(runtime: runtime).invocation(args, in: bottle, currentDirectory: cwd)
         do {
             let dir = LauncherBuilder.defaultDirectory
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let app = try LauncherBuilder.makeApp(named: program.name, invocation: invocation, in: dir)
-            if let data = ProgramIconResolver.iconData(for: program.url, in: bottle), let image = NSImage(data: data) {
+            if let data = ProgramIconResolver.iconData(for: program.iconURL ?? program.url, in: bottle), let image = NSImage(data: data) {
                 NSWorkspace.shared.setIcon(image, forFile: app.path, options: [])
             }
             log(bottle.id, "Atalho criado em \(app.path)")
@@ -664,6 +860,11 @@ final class AppModel {
             }
             runningCount[id, default: 1] -= 1
             rescanPrograms() // um instalador pode ter criado novos atalhos
+            // Instalou a Steam "na mão" (arrastando o SteamSetup.exe)? Mostra o guia.
+            if label.lowercased().hasPrefix("steamsetup"), Steam.isInstalled(in: bottle), recipeRun == nil {
+                ensureSharedLibrary()
+                guide = GuideState(kind: .steam, bottleID: id)
+            }
         }
     }
 

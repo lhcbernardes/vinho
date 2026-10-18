@@ -48,6 +48,18 @@ public struct WineRunner: Sendable {
         }
     }
 
+    /// Argumentos para um `Program` (inclui argumentos de atalhos personalizados).
+    public static func launchArguments(for program: Program) -> (arguments: [String], currentDirectory: URL?) {
+        let base = launchArguments(for: program.url)
+        return (base.arguments + program.arguments, base.currentDirectory)
+    }
+
+    /// Versão que não espera o programa: `start /unix` retorna assim que ele abre.
+    /// Útil para clientes que ficam abertos (Steam, launchers).
+    public static func detachedLaunchArguments(for program: URL, extra: [String] = []) -> [String] {
+        ["start", "/unix", program.path] + extra
+    }
+
     // MARK: - Execução
 
     public func run(_ invocation: WineInvocation) -> AsyncThrowingStream<ProcessEvent, Error> {
