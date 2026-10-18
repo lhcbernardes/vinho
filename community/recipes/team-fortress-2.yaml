@@ -1,0 +1,15 @@
+id: team-fortress-2
+name: Team Fortress 2
+revision: 1
+category: game
+description: Tiro multiplayer gratuito da Valve (Source engine 64-bit).
+homepage: https://store.steampowered.com/app/440/
+game:
+  store: steam
+  appid: 440
+  exe: 'Team Fortress 2\tf_win64.exe'
+  directx: 9
+  launchOptions: -novid
+guide:
+  - Usa VAC, que costuma funcionar no Wine.
+  - Se não abrir, teste "-vulkan" nas opções de inicialização.

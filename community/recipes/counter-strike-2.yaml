@@ -1,0 +1,16 @@
+id: counter-strike-2
+name: Counter-Strike 2
+revision: 1
+category: game
+description: Tiro competitivo gratuito da Valve (Source 2, DirectX 11).
+homepage: https://store.steampowered.com/app/730/
+game:
+  store: steam
+  appid: 730
+  exe: 'Counter-Strike Global Offensive\game\bin\win64\cs2.exe'
+  directx: 11
+  launchOptions: -novid -fullscreen
+guide:
+  - O download tem cerca de 35 GB.
+  - Partidas oficiais exigem VAC e o Wine pode ser bloqueado; avalie com “Funcionou?” para ajudar a comunidade.
+  - Se a tela ficar preta ao abrir, aperte Alt+Enter ou rode em janela (-windowed).

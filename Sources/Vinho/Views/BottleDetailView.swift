@@ -10,6 +10,7 @@ struct BottleDetailView: View {
 
     enum Tab: String, CaseIterable, Identifiable {
         case programs = "Programas"
+        case components = "Componentes"
         case settings = "Configurações"
         case snapshots = "Snapshots"
         case logs = "Logs"
@@ -25,9 +26,11 @@ struct BottleDetailView: View {
         VStack(spacing: 0) {
             header
             GuideBanner(bottle: bottle)
+            MissingComponentsBanner(bottle: bottle)
             Divider()
             switch tab {
             case .programs: ProgramsGrid(bottle: bottle)
+            case .components: ComponentsView(bottle: bottle)
             case .settings: BottleSettingsForm(bottle: bottle)
             case .snapshots: SnapshotsView(bottle: bottle)
             case .logs: LogConsole(bottle: bottle)
@@ -52,6 +55,7 @@ struct BottleDetailView: View {
                     Menu {
                         Button("Abrir Steam") { Task { await model.openSteam(in: bottle) } }
                         Button("Corrigir tela preta e reabrir") { Task { await model.fixSteam(bottle) } }
+                        Button("Adicionar jogos baixados à grade") { Task { await model.syncSteamLibrary(bottle) } }
                         Divider()
                         Button("Guia da Steam…") { model.guide = GuideState(kind: .steam, bottleID: bottle.id) }
                     } label: {
@@ -66,6 +70,7 @@ struct BottleDetailView: View {
                     Button("Gerenciador de Tarefas") { model.runTool("taskmgr", in: bottle) }
                     Button("Painel de Controle") { model.runTool("control", in: bottle) }
                     Button("Prompt de Comando") { model.runTool("wineconsole", in: bottle) }
+                    Button("Executar comando…") { model.isRunningCommand = true }
                     Divider()
                     Button("Abrir drive C: no Finder") { model.openDriveC(bottle) }
                     Divider()
@@ -241,6 +246,7 @@ private struct BottleSettingsForm: View {
                 Picker("Log do Wine", selection: binding(\.logLevel)) {
                     ForEach(WineLogLevel.allCases) { Text($0.displayName).tag($0) }
                 }
+                DebugChannelsField(bottle: bottle)
             }
 
             Section("Runtime") {
@@ -310,5 +316,49 @@ private struct LogConsole: View {
         case .stderr: .orange
         case .vinho: .purple
         }
+    }
+}
+
+/// Canais de debug do Wine (`WINEDEBUG`), com atalhos para os casos comuns.
+private struct DebugChannelsField: View {
+    @Environment(AppModel.self) private var model
+    let bottle: Bottle
+    @State private var text = ""
+
+    static let presets: [(String, String)] = [
+        ("DLLs carregadas", "+loaddll"),
+        ("DLLs faltando", "err+module,+loaddll"),
+        ("Direct3D", "+d3d,+d3d11,+dxgi"),
+        ("Áudio", "+mmdevapi,+coreaudio,+xaudio2"),
+        ("Controles", "+hid,+xinput,+dinput"),
+        ("Rede", "+winhttp,+wininet,+secur32"),
+        ("Arquivos", "+file"),
+        ("Tudo (muito lento)", "+all"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                TextField("Canais de debug", text: $text, prompt: Text(verbatim: "ex.: +loaddll,+d3d11"))
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit(save)
+                Menu("Predefinições") {
+                    ForEach(Self.presets, id: \.1) { preset in
+                        Button("\(preset.0)  (\(preset.1))") { text = preset.1; save() }
+                    }
+                    Divider()
+                    Button("Limpar (usar o nível de log)") { text = ""; save() }
+                }
+                .fixedSize()
+            }
+            Text("Substitui o “Log do Wine” quando preenchido. Vale na próxima execução; a saída aparece na aba Logs.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear { text = bottle.settings.debugChannels ?? "" }
+    }
+
+    private func save() {
+        let value = text.trimmingCharacters(in: .whitespaces)
+        Task { await model.update(bottle) { $0.debugChannels = value.isEmpty ? nil : value } }
     }
 }

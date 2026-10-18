@@ -16,7 +16,7 @@ public struct DownloadableArtifact: Codable, Hashable, Sendable {
 
 /// Um runtime Wine disponível para download.
 public struct RuntimeDescriptor: Codable, Identifiable, Hashable, Sendable {
-    public enum Channel: String, Codable, Sendable { case stable, devel, staging }
+    public enum Channel: String, Codable, Sendable { case stable, devel, staging, crossover }
 
     /// Também é o nome da pasta em `Runtimes/`.
     public var id: String
@@ -67,6 +67,23 @@ public struct Catalog: Codable, Hashable, Sendable {
         self.runtimes = runtimes
         self.components = components
     }
+
+    /// Junta outro catálogo (ex.: runtimes publicados pelo CI): ids repetidos
+    /// ficam com a versão de `other`.
+    public func merging(_ other: Catalog) -> Catalog {
+        var runtimes = self.runtimes
+        for r in other.runtimes {
+            if let i = runtimes.firstIndex(where: { $0.id == r.id }) { runtimes[i] = r } else { runtimes.append(r) }
+        }
+        var components = self.components
+        for c in other.components {
+            if let i = components.firstIndex(where: { $0.id == c.id }) { components[i] = c } else { components.append(c) }
+        }
+        return Catalog(schemaVersion: max(schemaVersion, other.schemaVersion), runtimes: runtimes, components: components)
+    }
+
+    /// Catálogo extra publicado pelo workflow `wine-runtime` (Wine com os patches da CodeWeavers).
+    public static let communityURL = URL(string: "https://github.com/lhcbernardes/vinho/releases/download/runtimes/runtimes.json")!
 
     public var recommendedRuntime: RuntimeDescriptor? {
         runtimes.first { $0.channel == .stable } ?? runtimes.first

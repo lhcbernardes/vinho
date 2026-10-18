@@ -19,7 +19,7 @@ public struct RecipeRunner: Sendable {
         launcher: any ProcessLaunching = FoundationProcessLauncher(),
         downloader: any Downloading = URLSessionDownloader(),
         cacheDirectory: URL = VinhoPaths.applicationSupport.appendingPathComponent("Cache/Recipes", isDirectory: true),
-        winetricksURL: URL? = RecipeRunner.findWinetricks()
+        winetricksURL: URL? = WinetricksManager.resolve()
     ) {
         self.runtime = runtime
         self.launcher = launcher
@@ -82,7 +82,12 @@ public struct RecipeRunner: Sendable {
                 guard let winetricks = winetricksURL else { throw RecipeError.winetricksMissing }
                 let invocation = wine.invocation(
                     ["-q"] + verbs, in: bottle, executable: winetricks,
-                    environment: ["WINE": runtime.wineURL.path, "WINESERVER": runtime.wineserverURL.path]
+                    environment: [
+                        "WINE": runtime.wineURL.path,
+                        "WINESERVER": runtime.wineserverURL.path,
+                        // cabextract/7z do Homebrew (o app aberto pelo Finder não herda o PATH do terminal).
+                        "PATH": "\(runtime.binURL.path):\(WinetricksManager.toolPath)",
+                    ]
                 )
                 try await execute(invocation, accepting: [0], events: events)
 

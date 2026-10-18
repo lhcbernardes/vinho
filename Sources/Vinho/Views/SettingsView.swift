@@ -41,6 +41,27 @@ private struct GeneralSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section {
+                Picker("Bottle padrão", selection: Binding(
+                    get: { model.defaultBottle?.id },
+                    set: { id in model.setDefault(model.bottles.first { $0.id == id }) }
+                )) {
+                    Text("Perguntar sempre").tag(Bottle.ID?.none)
+                    ForEach(model.bottles) { Text($0.name).tag(Optional($0.id)) }
+                }
+            } header: {
+                Text("Abrir pelo Finder")
+            } footer: {
+                Text("Clique com o botão direito num .exe, .msi ou .lnk ▸ Abrir com ▸ Vinho. Com um bottle padrão, ele roda direto; sem, o Vinho pergunta.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Atualizações") {
+                Toggle("Procurar atualizações automaticamente (1× por dia)", isOn: $model.autoCheckUpdates)
+                LabeledContent("Versão", value: AppModel.vinhoVersion)
+                Button("Procurar agora") { Task { await model.checkForUpdates(userInitiated: true) } }
+            }
+
             Section("Armazenamento") {
                 LabeledContent("Bottles", value: VinhoPaths.bottles.path)
                     .textSelection(.enabled)

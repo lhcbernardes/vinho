@@ -28,7 +28,10 @@ final class RecordingLauncher: ProcessLaunching, @unchecked Sendable {
 final class RecipeParsingTests: XCTestCase {
     func testBuiltInRecipesAreValid() {
         let entries = RecipeLibrary.builtIn()
-        XCTAssertEqual(Set(entries.map(\.id)), ["notepad-plus-plus", "7zip", "steam", "left-4-dead-2"])
+        XCTAssertEqual(Set(entries.map(\.id)), [
+            "notepad-plus-plus", "7zip", "steam", "epic-games-launcher", "gog-galaxy",
+            "left-4-dead-2", "portal-2", "half-life-2", "team-fortress-2", "counter-strike-2", "ghost-of-tsushima",
+        ])
         let npp = entries.first { $0.id == "notepad-plus-plus" }!.recipe
         XCTAssertTrue(npp.isVerified)
         XCTAssertEqual(npp.launch?.program, #"C:\Program Files\Notepad++\notepad++.exe"#)

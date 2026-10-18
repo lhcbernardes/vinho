@@ -1,0 +1,14 @@
+id: half-life-2
+name: Half-Life 2
+revision: 1
+category: game
+description: Clássico da Valve (Source engine, DirectX 9). Inclui os Episódios 1 e 2.
+homepage: https://store.steampowered.com/app/220/
+game:
+  store: steam
+  appid: 220
+  exe: 'Half-Life 2\hl2.exe'
+  directx: 9
+guide:
+  - Os episódios aparecem no menu do próprio jogo (atualização de aniversário).
+  - Se o FPS estiver baixo, teste "-vulkan" nas opções de inicialização.

@@ -54,7 +54,7 @@ final class AppModel {
     var installs: [String: InstallProgress] = [:]
     /// `wine --version` dos runtimes sem arquivo VERSION.
     var probedVersions: [String: String] = [:]
-    let catalog = Catalog.builtIn
+    var catalog = Catalog.builtIn
     private var installTasks: [String: Task<Void, Never>] = [:]
 
     // Receitas
@@ -62,7 +62,7 @@ final class AppModel {
     var recipeErrors: [String] = []
     var recipeRun: RecipeRunState?
     var isShowingRecipes = false
-    private var recipeTask: Task<Void, Never>?
+    var recipeTask: Task<Void, Never>?
 
     var communityIndexURL: String {
         didSet { UserDefaults.standard.set(communityIndexURL, forKey: "communityIndexURL") }
@@ -90,11 +90,35 @@ final class AppModel {
         didSet { UserDefaults.standard.set(defaultRuntimeID, forKey: "defaultRuntimeID") }
     }
 
-    private let manager = BottleManager()
+    let manager = BottleManager()
     private let locator = RuntimeLocator()
     private let maxLogLines = 5_000
 
+    // MARK: Abrir pelo Finder / bottle padrão
+    /// Bottle onde .exe abertos pelo Finder rodam sem perguntar.
+    var defaultBottlePath: String? {
+        didSet { UserDefaults.standard.set(defaultBottlePath, forKey: "defaultBottlePath") }
+    }
+    /// Arquivo aberto pelo Finder esperando a escolha do bottle.
+    var openRequest: OpenRequest?
+    /// Arquivos que chegaram antes da lista de bottles carregar.
+    var pendingOpenURLs: [URL] = []
+    var hasLoadedBottles = false
+
+    /// Folha "Executar comando…".
+    var isRunningCommand = false
+
+    // MARK: Atualizações
+    var availableUpdate: AppUpdater.Release?
+    var updateStatus: String?
+    var isInstallingUpdate = false
+    var autoCheckUpdates: Bool {
+        didSet { UserDefaults.standard.set(autoCheckUpdates, forKey: "autoCheckUpdates") }
+    }
+
     init() {
+        defaultBottlePath = UserDefaults.standard.string(forKey: "defaultBottlePath")
+        autoCheckUpdates = UserDefaults.standard.object(forKey: "autoCheckUpdates") as? Bool ?? true
         defaultRuntimeID = UserDefaults.standard.string(forKey: "defaultRuntimeID")
         autoSnapshotInstallers = UserDefaults.standard.object(forKey: "autoSnapshotInstallers") as? Bool ?? true
         communityIndexURL = UserDefaults.standard.string(forKey: "communityIndexURL") ?? ""
@@ -131,7 +155,10 @@ final class AppModel {
         do {
             bottles = try await manager.list()
             if selection == nil || selectedBottle == nil { selection = bottles.first?.id }
+            hasLoadedBottles = true
+            await syncSteamLibraries()
             rescanPrograms()
+            processPendingOpens()
         } catch {
             show(error)
         }
@@ -382,6 +409,12 @@ final class AppModel {
             Task { await openSteam(in: bottle, url: program.arguments.first) }
             return
         }
+        // Epic/GOG usam CEF como a Steam: abrem com as flags que evitam a tela preta.
+        var program = program
+        if program.arguments.isEmpty, let launcher = GameLauncher.detect(program.url), launcher != .steam {
+            program = Program(url: program.url, kind: program.kind, arguments: launcher.launchArguments,
+                              displayName: program.displayName, iconURL: program.iconURL, profileID: program.profileID)
+        }
         let (args, cwd) = WineRunner.launchArguments(for: program)
         run(args, in: bottle, currentDirectory: cwd, label: program.name)
     }
@@ -468,6 +501,10 @@ final class AppModel {
         panel.allowedContentTypes = [Self.bottleArchiveType]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        importBottle(from: url)
+    }
+
+    func importBottle(from url: URL) {
         Task {
             busyMessage = "Importando…"
             defer { busyMessage = nil }
@@ -512,10 +549,14 @@ final class AppModel {
         panel.allowedContentTypes = [UTType(filenameExtension: "yaml"), UTType(filenameExtension: "yml")].compactMap { $0 }
         panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK else { return }
+        importRecipe(from: panel.urls)
+    }
+
+    func importRecipe(from urls: [URL]) {
         do {
             let dir = RecipeLibrary.userDirectory
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            for url in panel.urls {
+            for url in urls {
                 _ = try Recipe.parse(String(contentsOf: url, encoding: .utf8)) // valida antes de copiar
                 let dest = dir.appendingPathComponent(url.lastPathComponent)
                 if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
@@ -531,7 +572,12 @@ final class AppModel {
     func install(_ entry: RecipeEntry, into target: Bottle?) {
         guard recipeRun == nil else { return }
         isShowingRecipes = false
-        recipeTask = Task {
+        // Epic/GOG vão para o bottle de jogos (o da Steam), se houver.
+        var target = target
+        if target == nil, entry.recipe.provides.contains(where: { $0 == "epic" || $0 == "gog" }) {
+            target = LauncherPlanner.steamBottle(in: bottles)
+        }
+        recipeTask = Task { [target] in
             if let game = entry.recipe.game {
                 await installGame(entry.recipe, game: game, preferred: target)
             } else {
@@ -698,7 +744,7 @@ final class AppModel {
     var editingProfile: ProfileEditing?
 
     /// Roda os passos de uma receita com progresso no banner.
-    private func runSteps(of recipe: Recipe, in bottle: Bottle) async throws {
+    func runSteps(of recipe: Recipe, in bottle: Bottle) async throws {
         guard let runtime = runtime(for: bottle) else { throw WineError.noRuntimeAvailable }
         recipeRun = RecipeRunState(recipeName: recipe.name, bottleID: bottle.id)
         selection = bottle.id
@@ -893,7 +939,7 @@ final class AppModel {
         }
     }
 
-    private func uniqueBottleName(_ base: String) -> String {
+    func uniqueBottleName(_ base: String) -> String {
         let taken = Set(bottles.map { $0.name.lowercased() })
         var name = base
         var n = 2
@@ -987,7 +1033,7 @@ final class AppModel {
         NSWorkspace.shared.open(bottle.driveC)
     }
 
-    private func run(_ args: [String], in bottle: Bottle, currentDirectory: URL?, label: String) {
+    func run(_ args: [String], in bottle: Bottle, currentDirectory: URL?, label: String) {
         guard let runtime = runtime(for: bottle) else { return show(WineError.noRuntimeAvailable) }
         if !runtime.supports(bottle.settings.graphics) {
             log(bottle.id, "Aviso: \(runtime.id) não suporta \(bottle.settings.graphics.displayName); o jogo pode cair para WineD3D.")
@@ -1011,6 +1057,8 @@ final class AppModel {
                 show(error)
             }
             runningCount[id, default: 1] -= 1
+            // A Steam pode ter terminado de baixar um jogo: cria o atalho dele.
+            if Steam.isInstalled(in: bottle) { await syncSteamLibrary(bottle) }
             rescanPrograms() // um instalador pode ter criado novos atalhos
             // Instalou a Steam "na mão" (arrastando o SteamSetup.exe)? Mostra o guia.
             if label.lowercased().hasPrefix("steamsetup"), Steam.isInstalled(in: bottle), recipeRun == nil {
@@ -1024,7 +1072,7 @@ final class AppModel {
 
     func clearLogs(_ bottle: Bottle) { logs[bottle.id] = [] }
 
-    private func log(_ id: Bottle.ID, _ text: String) {
+    func log(_ id: Bottle.ID, _ text: String) {
         append(id, LogLine(source: .vinho, text: text))
     }
 
@@ -1039,7 +1087,7 @@ final class AppModel {
         if let i = bottles.firstIndex(where: { $0.id == bottle.id }) { bottles[i] = bottle }
     }
 
-    private func show(_ error: Error) {
+    func show(_ error: Error) {
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }

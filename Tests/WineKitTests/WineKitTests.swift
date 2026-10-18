@@ -21,7 +21,7 @@ final class GraphicsAndEnvironmentTests: XCTestCase {
         XCTAssertNil(env["SECRET"], "variáveis não listadas não devem vazar para o Wine")
         XCTAssertEqual(env["PATH"], "/opt/wine/bin:/usr/bin")
         XCTAssertEqual(env["WINEMSYNC"], "1")
-        XCTAssertEqual(env["WINEDEBUG"], "-all")
+        XCTAssertEqual(env["WINEDEBUG"], "-all,err+module")
         XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("d3d11=b"))
         XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("mscoree="))
     }

@@ -73,6 +73,35 @@ public actor BottleManager {
         return updated
     }
 
+    /// Duplica um bottle (clone APFS: instantâneo e quase sem espaço extra).
+    public func duplicate(_ bottle: Bottle, as newName: String? = nil) throws -> Bottle {
+        let taken = Set(try list().map { $0.name.lowercased() })
+        let base = newName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "\(bottle.name) (cópia)"
+        var name = base
+        var n = 2
+        while taken.contains(name.lowercased()) {
+            name = "\(base) \(n)"
+            n += 1
+        }
+        let destination = rootURL.appendingPathComponent(uniqueFolderName(for: name), isDirectory: true)
+        try fileManager.copyItem(at: bottle.url, to: destination)
+        var copy = Bottle(url: destination, settings: bottle.settings)
+        copy.settings.name = name
+        copy.settings.createdAt = Date()
+        // Atalhos personalizados apontam para caminhos do bottle original: reescreve.
+        copy.settings.shortcuts = bottle.settings.shortcuts.map { shortcut in
+            var s = shortcut
+            s.program = s.program.replacingOccurrences(of: bottle.url.path, with: destination.path)
+            s.icon = s.icon?.replacingOccurrences(of: bottle.url.path, with: destination.path)
+            return s
+        }
+        copy.settings.pinnedPrograms = bottle.settings.pinnedPrograms.map {
+            $0.replacingOccurrences(of: bottle.url.path, with: destination.path)
+        }
+        try save(copy)
+        return copy
+    }
+
     /// Por padrão manda para o Lixo (recuperável).
     public func delete(_ bottle: Bottle, moveToTrash: Bool = true) throws {
         #if os(macOS)
@@ -127,4 +156,8 @@ public actor BottleManager {
         d.dateDecodingStrategy = .iso8601
         return d
     }()
+}
+
+extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

@@ -1,0 +1,16 @@
+id: ghost-of-tsushima
+name: Ghost of Tsushima
+revision: 1
+category: game
+description: Mundo aberto da Sucker Punch (Director's Cut, DirectX 12).
+homepage: https://store.steampowered.com/app/2215430/
+game:
+  store: steam
+  appid: 2215430
+  exe: 'Ghost of Tsushima DIRECTOR''S CUT\GhostOfTsushima.exe'
+  directx: 12
+guide:
+  - Precisa do Game Porting Toolkit (D3DMetal) e de um Mac com Apple Silicon e 16 GB de memória ou mais.
+  - O download tem cerca de 75 GB; a biblioteca S: fica na pasta do seu Mac, não dentro do bottle.
+  - O jogo pede login na PlayStation Network só para o modo online (Legends); a campanha roda sem.
+  - Comece no preset Baixo e com escala de resolução (FSR/XeSS) ativada.

@@ -1,0 +1,22 @@
+id: epic-games-launcher
+name: Epic Games Launcher
+revision: 1
+category: game
+description: Loja e biblioteca de jogos da Epic.
+provides: [epic]
+homepage: https://store.epicgames.com
+notes: O Vinho abre a Epic com -opengl (a interface fica preta sem isso no Wine). Jogos com anti-cheat do kernel (Fortnite) não funcionam.
+bottle:
+  windows: win10
+  graphics: dxmt
+steps:
+  - download:
+      url: https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi
+      file: EpicGamesLauncherInstaller.msi
+  - run:
+      file: EpicGamesLauncherInstaller.msi
+      args: ["/qn"]
+launch:
+  program: 'C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe'
+  name: Epic Games
+  args: ["-opengl", "-SkipBuildPatchPrereq"]

@@ -65,3 +65,21 @@ simplifica: tudo em Swift, `Process` direto.
 - Diagnóstico de primeira classe: console de log filtrável, HUD Metal, "por que não abriu?".
 - Snapshots APFS de bottles antes de instalar algo (rollback instantâneo).
 - Extração de ícones dos `.exe` (recurso PE) para a grade de programas.
+
+## Comparação atual (out/2026)
+
+| CrossOver | Vinho |
+|---|---|
+| Wine com patches da CodeWeavers | Gcenx (stable/devel/staging) + workflow `wine-runtime` que compila o código-fonte do CrossOver (experimental) |
+| Wine Mono/Gecko e dependências pelo CrossTie | Aba **Componentes**: Wine Mono (SHA-256) e verbos do winetricks fixado |
+| Detecção de dependências | `MissingComponentDetector` lê `Library X.dll … not found` no log |
+| Ajustes por aplicativo | Perfis por executável (AppDefaults), criados também para jogos baixados direto pela Steam |
+| Steam, Epic, GOG, EA, Ubisoft | Steam (correções automáticas), Epic, GOG |
+| Abrir .exe pelo Finder, bottle padrão | `CFBundleDocumentTypes` + bottle padrão ★ ou folha “Abrir com” |
+| Atualização automática | `AppUpdater` (releases do GitHub, 1×/dia) |
+| Executar comando, canais de debug, duplicar bottle | ⇧⌘O, campo “Canais de debug”, ⇧⌘D |
+
+### Ainda faltando
+- D3DMetal próprio: o Vinho usa o do Game Porting Toolkit instalado pelo usuário (a licença da Apple não permite redistribuir).
+- EA app e Ubisoft Connect (anti-cheat e CEF ainda instáveis no Wine do macOS).
+- Wine Gecko (o domínio da WineHQ não está no allowlist usado no desenvolvimento; o mshtml segue desativado).

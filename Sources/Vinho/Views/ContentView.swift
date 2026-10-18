@@ -35,6 +35,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 if model.rosettaMissing { RosettaBanner() }
                 if let run = model.recipeRun { RecipeProgressBanner(state: run) }
+                if let release = model.availableUpdate { UpdateBanner(release: release) }
             }
         }
         .sheet(isPresented: $model.isShowingRecipes) {
@@ -53,6 +54,20 @@ struct ContentView: View {
         }
         .sheet(isPresented: $model.isCreatingBottle) {
             NewBottleSheet()
+        }
+        .sheet(item: $model.openRequest) { request in
+            OpenWithSheet(request: request)
+        }
+        .sheet(isPresented: $model.isRunningCommand) {
+            if let bottle = model.selectedBottle { RunCommandSheet(bottle: bottle) }
+        }
+        .alert(
+            "Atualizações",
+            isPresented: Binding(get: { model.updateStatus != nil }, set: { if !$0 { model.updateStatus = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.updateStatus ?? "")
         }
         .alert(
             "Algo deu errado",
@@ -81,6 +96,10 @@ private struct BottleSidebar: View {
                     HStack {
                         Label(bottle.name, systemImage: "wineglass")
                         Spacer()
+                        if model.isDefault(bottle) {
+                            Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow)
+                                .help("Bottle padrão: .exe abertos pelo Finder rodam aqui")
+                        }
                         if (model.runningCount[bottle.id] ?? 0) > 0 {
                             Circle().fill(.green).frame(width: 7, height: 7)
                                 .help("Processos em execução")
@@ -91,6 +110,12 @@ private struct BottleSidebar: View {
                         Button("Renomear…") { newName = bottle.name; renaming = bottle }
                         Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([bottle.url]) }
                         Button("Exportar…") { model.exportBottle(bottle) }
+                        Button("Duplicar") { Task { await model.duplicate(bottle) } }
+                        if model.isDefault(bottle) {
+                            Button("Deixar de ser o padrão") { model.setDefault(nil) }
+                        } else {
+                            Button("Usar como padrão") { model.setDefault(bottle) }
+                        }
                         Divider()
                         Button("Apagar…", role: .destructive) { deleting = bottle }
                     }

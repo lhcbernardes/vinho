@@ -84,7 +84,7 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] Catálogo de runtimes com download verificado por SHA-256, progresso e cancelamento
 - [x] DXMT/DXVK com um clique (variantes de runtime via clone APFS)
 - [x] `wine --version` em background para exibir versão
-- [ ] Catálogo remoto (JSON) para atualizar versões sem novo release do app
+- [x] Catálogo remoto (`runtimes.json` da release `runtimes`) somado ao embutido
 
 **Fase 3 — Experiência** ✅
 - [x] Ícones reais extraídos dos `.exe` (recursos PE `RT_GROUP_ICON`) e dos atalhos `.lnk`
@@ -106,6 +106,17 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] Biblioteca de jogos compartilhada entre os bottles de Steam
 - [x] Guia "Próximos passos" que se marca sozinho (login, biblioteca, download) e aviso no bottle quando há pendências
 - [x] Detecção da Steam instalada manualmente (arrastando o SteamSetup.exe)
+
+**Paridade com o CrossOver** ✅
+- [x] **Componentes do Windows** num clique (aba Componentes): Wine Mono, Visual C++ 2008–2022, .NET 4.8, d3dx9, d3dcompiler_47, XACT, XInput, PhysX, fontes — winetricks fixado e verificado por SHA-256
+- [x] **DLLs faltando**: o Vinho lê o log do Wine e sugere o componente certo
+- [x] **Ajustes automáticos por jogo**: jogos baixados pela Steam viram atalhos com perfil próprio, com ou sem receita
+- [x] **Epic Games e GOG Galaxy** (receitas; abrem com as flags que evitam a tela preta)
+- [x] Receitas de Portal 2, Half-Life 2, TF2, Counter-Strike 2 e Ghost of Tsushima
+- [x] **Abrir .exe/.msi/.lnk pelo Finder** (Abrir com ▸ Vinho) e **bottle padrão** (★)
+- [x] **Atualização automática** do app pelas releases do GitHub
+- [x] **Executar comando** com argumentos (⇧⌘O), **canais de debug** com predefinições e **duplicar bottle** (⇧⌘D)
+- [x] Workflow **Wine runtime (CrossOver)** — compila o Wine com os patches da CodeWeavers a partir do código-fonte (experimental)
 
 **Fase 5 — Comunidade** ✅
 - [x] CI (GitHub Actions) com testes e validação das receitas de `community/`

@@ -62,10 +62,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
-      <key>CFBundleTypeName</key><string>Windows Executable</string>
+      <key>CFBundleTypeName</key><string>Programa do Windows</string>
       <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSHandlerRank</key><string>Alternate</string>
-      <key>LSItemContentTypes</key><array><string>com.microsoft.windows-executable</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>exe</string><string>msi</string><string>lnk</string><string>bat</string></array>
     </dict>
     <dict>
       <key>CFBundleTypeName</key><string>Vinho Bottle</string>

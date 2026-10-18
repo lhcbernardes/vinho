@@ -24,13 +24,18 @@ public enum WineEnvironment {
         let systemPath = base["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = "\(runtime.binURL.path):\(systemPath)"
         env["WINEPREFIX"] = bottle.prefixURL.path
-        env["WINEDEBUG"] = s.logLevel.winedebug
+        let channels = s.debugChannels?.trimmingCharacters(in: .whitespaces) ?? ""
+        env["WINEDEBUG"] = channels.isEmpty ? s.logLevel.winedebug : channels
 
         // Overrides: backend gráfico primeiro, overrides do usuário por cima.
         var overrides = s.graphics.dllOverrides
         overrides.merge(s.dllOverrides) { _, user in user }
-        // Evita o diálogo "instalar Mono/Gecko" a cada wineboot.
-        overrides["mscoree"] = overrides["mscoree"] ?? .disabled
+        // Evita o diálogo "instalar Mono/Gecko" a cada wineboot — a não ser que
+        // um .NET (Wine Mono ou o da Microsoft) tenha sido instalado pelo Vinho:
+        // aí o mscoree precisa carregar. (A env var ganharia do registro.)
+        if !s.windowsComponents.contains(where: WindowsComponents.dotNetIDs.contains) {
+            overrides["mscoree"] = overrides["mscoree"] ?? .disabled
+        }
         overrides["mshtml"] = overrides["mshtml"] ?? .disabled
         env["WINEDLLOVERRIDES"] = DLLOverrides.format(overrides)
 
@@ -49,6 +54,10 @@ public enum WineEnvironment {
             // Necessário para que o loader encontre o D3DMetal.framework nos builds GPTK.
             let external = runtime.libURL.appendingPathComponent("external").path
             env["DYLD_FALLBACK_LIBRARY_PATH"] = [external, runtime.libURL.path, "/usr/lib"].joined(separator: ":")
+        } else if FileManager.default.fileExists(atPath: runtime.rootURL.appendingPathComponent(WineRuntime.bundledLibsMarker).path) {
+            // Builds do workflow `wine-runtime` (CrossOver) trazem freetype, gnutls,
+            // MoltenVK etc. em lib/, carregados por dlopen.
+            env["DYLD_FALLBACK_LIBRARY_PATH"] = [runtime.libURL.path, "/usr/lib"].joined(separator: ":")
         }
 
         env.merge(s.environment) { _, user in user }

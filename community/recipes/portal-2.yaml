@@ -1,0 +1,14 @@
+id: portal-2
+name: Portal 2
+revision: 1
+category: game
+description: Quebra-cabeças da Valve (Source engine, DirectX 9).
+homepage: https://store.steampowered.com/app/620/
+game:
+  store: steam
+  appid: 620
+  exe: 'Portal 2\portal2.exe'
+  directx: 9
+guide:
+  - O download tem cerca de 12 GB.
+  - O cooperativo online funciona pela Steam; a tela dividida local precisa de dois controles.

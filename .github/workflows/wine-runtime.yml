@@ -1,0 +1,123 @@
+name: Wine runtime (CrossOver)
+
+# EXPERIMENTAL. Compila o Wine a partir do código-fonte que a CodeWeavers
+# publica (LGPL) — o mesmo Wine do CrossOver, com os patches deles — e publica
+# na release "runtimes" junto com `runtimes.json`. O Vinho lê esse catálogo
+# (Catalog.communityURL) e mostra o runtime em Ajustes ▸ Runtimes.
+#
+# Rode em Actions ▸ "Wine runtime (CrossOver)" ▸ Run workflow, informando a
+# versão (ex.: 25.1.0). Lista: https://media.codeweavers.com/pub/crossover/source/
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão do CrossOver (ex.: 25.1.0)"
+        required: true
+      revision:
+        description: "Revisão do pacote (aumente para republicar a mesma versão)"
+        required: false
+        default: "1"
+
+permissions:
+  contents: write
+
+env:
+  CX_VERSION: ${{ inputs.version }}
+  RUNTIME_ID: wine-cx-${{ inputs.version }}_${{ inputs.revision }}
+  # Dependências que o Wine abre com dlopen e que vão junto em lib/.
+  BUNDLED_FORMULAE: freetype gnutls nettle gmp libtasn1 p11-kit libidn2 libunistring gettext molten-vk sdl2 libpng
+
+jobs:
+  build:
+    # x86_64 nativo: o Wine roda sob Rosetta 2 nos Macs Apple Silicon.
+    runs-on: macos-15-intel
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências de build
+        run: |
+          brew update
+          brew install bison flex pkgconf mingw-w64 \
+            freetype gnutls molten-vk sdl2 gstreamer gettext libpng
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+
+      - name: Baixar o código-fonte da CodeWeavers
+        run: |
+          curl -fL --retry 3 -o cx.tar.gz \
+            "https://media.codeweavers.com/pub/crossover/source/crossover-sources-${CX_VERSION}.tar.gz"
+          shasum -a 256 cx.tar.gz | tee cx.tar.gz.sha256
+          tar -xzf cx.tar.gz
+          test -x sources/wine/configure
+
+      - name: Configurar
+        run: |
+          mkdir -p build && cd build
+          export CC=clang CXX=clang++
+          export CPATH="$(brew --prefix)/include"
+          export LIBRARY_PATH="$(brew --prefix)/lib"
+          export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig"
+          export MACOSX_DEPLOYMENT_TARGET=11.0
+          export CROSSCFLAGS="-g -O2"
+          export CFLAGS="-g -O2 -Wno-deprecated-declarations -Wno-incompatible-function-pointer-types -Wno-int-conversion"
+          ../sources/wine/configure \
+            --prefix= \
+            --disable-tests \
+            --enable-archs=i386,x86_64 \
+            --with-coreaudio --with-cups --with-freetype --with-gettext --with-gnutls \
+            --with-gstreamer --with-mingw --with-opencl --with-opengl --with-pthread \
+            --with-sdl --with-unwind --with-vulkan \
+            --without-alsa --without-capi --without-dbus --without-fontconfig \
+            --without-gettextpo --without-gphoto --without-gssapi --without-inotify \
+            --without-krb5 --without-netapi --without-oss --without-pcap --without-pulse \
+            --without-sane --without-udev --without-usb --without-v4l2 --without-x
+
+      - name: Compilar
+        run: make -C build -j"$(sysctl -n hw.ncpu)"
+
+      - name: Instalar e empacotar
+        run: |
+          DEST="$PWD/out/$RUNTIME_ID"
+          make -C build install-lib DESTDIR="$DEST"
+          # Dependências abertas por dlopen (o Vinho aponta DYLD_FALLBACK_LIBRARY_PATH para lib/).
+          for f in $BUNDLED_FORMULAE; do
+            cp -a "$(brew --prefix "$f")"/lib/*.dylib "$DEST/lib/" 2>/dev/null || true
+          done
+          touch "$DEST/VINHO_BUNDLED_LIBS"
+          echo "$CX_VERSION" > "$DEST/VERSION"
+          "$DEST/bin/wine" --version || true
+          tar -C out -cJf "$RUNTIME_ID-osx64.tar.xz" "$RUNTIME_ID"
+          ls -lh "$RUNTIME_ID-osx64.tar.xz"
+
+      - name: Atualizar runtimes.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release view runtimes >/dev/null 2>&1 || \
+            gh release create runtimes --prerelease --title "Runtimes Wine (experimental)" \
+              --notes "Builds do Wine a partir do código-fonte do CrossOver (LGPL). Gerados pelo workflow wine-runtime."
+          gh release download runtimes -p runtimes.json -O old.json 2>/dev/null || echo '{"schemaVersion":1,"runtimes":[],"components":[]}' > old.json
+          python3 - <<'PY'
+          import hashlib, json, os
+          rid = os.environ["RUNTIME_ID"]; ver = os.environ["CX_VERSION"]; repo = os.environ["REPO"]
+          name = f"{rid}-osx64.tar.xz"
+          data = open(name, "rb").read()
+          catalog = json.load(open("old.json"))
+          entry = {
+              "id": rid, "name": "Wine CrossOver", "version": ver, "channel": "crossover",
+              "artifact": {
+                  "url": f"https://github.com/{repo}/releases/download/runtimes/{name}",
+                  "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+              },
+              "notes": "Experimental: Wine com os patches da CodeWeavers, compilado do código-fonte do CrossOver.",
+          }
+          catalog["runtimes"] = [r for r in catalog.get("runtimes", []) if r["id"] != rid] + [entry]
+          catalog.setdefault("components", [])
+          catalog.setdefault("schemaVersion", 1)
+          json.dump(catalog, open("runtimes.json", "w"), indent=2, ensure_ascii=False)
+          print(json.dumps(entry, indent=2))
+          PY
+          gh release upload runtimes "$RUNTIME_ID-osx64.tar.xz" runtimes.json --clobber

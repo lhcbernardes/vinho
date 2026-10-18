@@ -10,6 +10,9 @@ public struct WineRuntime: Identifiable, Hashable, Sendable {
     public let capabilities: Set<RuntimeCapability>
     public let version: String?
 
+    /// Arquivo na raiz de runtimes que trazem as dylibs de dependência em `lib/`.
+    public static let bundledLibsMarker = "VINHO_BUNDLED_LIBS"
+
     public init(id: String, rootURL: URL, capabilities: Set<RuntimeCapability>, version: String? = nil) {
         self.id = id
         self.rootURL = rootURL

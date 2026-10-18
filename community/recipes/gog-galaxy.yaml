@@ -1,0 +1,21 @@
+id: gog-galaxy
+name: GOG Galaxy
+revision: 1
+category: game
+description: Loja e biblioteca de jogos da GOG (sem DRM).
+provides: [gog]
+homepage: https://www.gog.com/galaxy
+notes: Ao fim da instalação o GOG Galaxy abre sozinho; feche-o para o Vinho terminar e criar o atalho.
+bottle:
+  windows: win10
+  graphics: dxmt
+steps:
+  - download:
+      url: https://webinstallers.gog-statics.com/download/GOG_Galaxy_2.0.exe
+      file: GOG_Galaxy_2.0.exe
+  - run:
+      file: GOG_Galaxy_2.0.exe
+launch:
+  program: 'C:\Program Files (x86)\GOG Galaxy\GalaxyClient.exe'
+  name: GOG Galaxy
+  args: ["--disable-gpu"]
