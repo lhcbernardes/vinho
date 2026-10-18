@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 import WineKit
 
 struct LogLine: Identifiable, Hashable {
@@ -33,6 +34,13 @@ final class AppModel {
     let catalog = Catalog.builtIn
     private var installTasks: [String: Task<Void, Never>] = [:]
 
+    var snapshots: [Bottle.ID: [BottleSnapshot]] = [:]
+    private let snapshotManager = SnapshotManager()
+
+    var autoSnapshotInstallers: Bool {
+        didSet { UserDefaults.standard.set(autoSnapshotInstallers, forKey: "autoSnapshotInstallers") }
+    }
+
     var defaultRuntimeID: String? {
         didSet { UserDefaults.standard.set(defaultRuntimeID, forKey: "defaultRuntimeID") }
     }
@@ -43,6 +51,7 @@ final class AppModel {
 
     init() {
         defaultRuntimeID = UserDefaults.standard.string(forKey: "defaultRuntimeID")
+        autoSnapshotInstallers = UserDefaults.standard.object(forKey: "autoSnapshotInstallers") as? Bool ?? true
     }
 
     // MARK: Derivados
@@ -160,6 +169,8 @@ final class AppModel {
                 try? await WineRunner(runtime: runtime).killAll(bottle)
             }
             try await manager.delete(bottle)
+            try? snapshotManager.deleteAll(for: bottle)
+            snapshots[bottle.id] = nil
             logs[bottle.id] = nil
             if selection == bottle.id { selection = nil }
             await refresh()
@@ -283,8 +294,135 @@ final class AppModel {
     // MARK: Execução
 
     func launch(_ program: URL, in bottle: Bottle) {
+        if autoSnapshotInstallers && Self.looksLikeInstaller(program) {
+            Task {
+                await createSnapshot(bottle, label: "Antes de \(program.lastPathComponent)")
+                launchNow(program, in: bottle)
+            }
+        } else {
+            launchNow(program, in: bottle)
+        }
+    }
+
+    private func launchNow(_ program: URL, in bottle: Bottle) {
         let (args, cwd) = WineRunner.launchArguments(for: program)
         run(args, in: bottle, currentDirectory: cwd, label: program.lastPathComponent)
+    }
+
+    static func looksLikeInstaller(_ url: URL) -> Bool {
+        if url.pathExtension.lowercased() == "msi" { return true }
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        return ["setup", "install", "instal"].contains { name.contains($0) }
+    }
+
+    // MARK: Snapshots
+
+    func loadSnapshots(_ bottle: Bottle) {
+        snapshots[bottle.id] = snapshotManager.list(bottle)
+    }
+
+    func createSnapshot(_ bottle: Bottle, label: String) async {
+        busyMessage = "Criando snapshot…"
+        defer { busyMessage = nil }
+        let manager = snapshotManager
+        do {
+            _ = try await Task.detached { try manager.create(bottle, label: label) }.value
+            log(bottle.id, "📸 Snapshot criado: \(label)")
+            loadSnapshots(bottle)
+        } catch {
+            show(error)
+        }
+    }
+
+    func restore(_ snapshot: BottleSnapshot, in bottle: Bottle) async {
+        busyMessage = "Restaurando snapshot…"
+        defer { busyMessage = nil }
+        let manager = snapshotManager
+        do {
+            if let runtime = runtime(for: bottle) {
+                try? await WineRunner(runtime: runtime).killAll(bottle)
+            }
+            try await Task.detached { try manager.restore(snapshot, to: bottle) }.value
+            log(bottle.id, "⏪ Restaurado: \(snapshot.label)")
+            await refresh()
+            loadSnapshots(bottle)
+        } catch {
+            show(error)
+        }
+    }
+
+    func deleteSnapshot(_ snapshot: BottleSnapshot, in bottle: Bottle) {
+        do {
+            try snapshotManager.delete(snapshot)
+            loadSnapshots(bottle)
+        } catch {
+            show(error)
+        }
+    }
+
+    // MARK: Exportar / importar
+
+    static var bottleArchiveType: UTType {
+        UTType(filenameExtension: BottleArchiver.fileExtension) ?? .data
+    }
+
+    func exportBottle(_ bottle: Bottle) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [Self.bottleArchiveType]
+        panel.nameFieldStringValue = "\(bottle.name).\(BottleArchiver.fileExtension)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            busyMessage = "Exportando “\(bottle.name)”…"
+            defer { busyMessage = nil }
+            do {
+                if let runtime = runtime(for: bottle) {
+                    try? await WineRunner(runtime: runtime).killAll(bottle)
+                }
+                try await BottleArchiver.export(bottle, to: url)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                show(error)
+            }
+        }
+    }
+
+    func importBottle() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [Self.bottleArchiveType]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            busyMessage = "Importando…"
+            defer { busyMessage = nil }
+            do {
+                let bottle = try await manager.importBottle(from: url)
+                await refresh()
+                selection = bottle.id
+                rescanPrograms()
+            } catch {
+                show(error)
+            }
+        }
+    }
+
+    // MARK: Atalhos (Launchpad / Spotlight / Dock)
+
+    func createShortcut(for program: Program, in bottle: Bottle) {
+        guard let runtime = runtime(for: bottle) else { return show(WineError.noRuntimeAvailable) }
+        let (args, cwd) = WineRunner.launchArguments(for: program.url)
+        let invocation = WineRunner(runtime: runtime).invocation(args, in: bottle, currentDirectory: cwd)
+        do {
+            let dir = LauncherBuilder.defaultDirectory
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let app = try LauncherBuilder.makeApp(named: program.name, invocation: invocation, in: dir)
+            if let data = ProgramIconResolver.iconData(for: program.url, in: bottle), let image = NSImage(data: data) {
+                NSWorkspace.shared.setIcon(image, forFile: app.path, options: [])
+            }
+            log(bottle.id, "Atalho criado em \(app.path)")
+            NSWorkspace.shared.activateFileViewerSelecting([app])
+        } catch {
+            show(error)
+        }
     }
 
     /// Ferramentas embutidas do Wine: winecfg, regedit, taskmgr, cmd, control…

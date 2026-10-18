@@ -75,6 +75,7 @@ private struct BottleSidebar: View {
                     .contextMenu {
                         Button("Renomear…") { newName = bottle.name; renaming = bottle }
                         Button("Mostrar no Finder") { NSWorkspace.shared.activateFileViewerSelecting([bottle.url]) }
+                        Button("Exportar…") { model.exportBottle(bottle) }
                         Divider()
                         Button("Apagar…", role: .destructive) { deleting = bottle }
                     }

@@ -11,6 +11,7 @@ struct BottleDetailView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case programs = "Programas"
         case settings = "Configurações"
+        case snapshots = "Snapshots"
         case logs = "Logs"
         var id: String { rawValue }
     }
@@ -27,6 +28,7 @@ struct BottleDetailView: View {
             switch tab {
             case .programs: ProgramsGrid(bottle: bottle)
             case .settings: BottleSettingsForm(bottle: bottle)
+            case .snapshots: SnapshotsView(bottle: bottle)
             case .logs: LogConsole(bottle: bottle)
             }
         }
@@ -131,10 +133,7 @@ private struct ProgramsGrid: View {
                     ForEach(model.programs) { program in
                         Button { model.launch(program.url, in: bottle) } label: {
                             VStack(spacing: 8) {
-                                Image(systemName: program.kind == .shortcut ? "app.badge" : "app")
-                                    .font(.system(size: 34))
-                                    .frame(width: 64, height: 64)
-                                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 14))
+                                ProgramIconView(program: program, bottle: bottle)
                                 Text(program.name)
                                     .font(.callout)
                                     .lineLimit(2)
@@ -148,6 +147,7 @@ private struct ProgramsGrid: View {
                         .contextMenu {
                             Button("Executar") { model.launch(program.url, in: bottle) }
                             Button("Fixar") { Task { await model.pin(program.url, in: bottle) } }
+                            Button("Criar atalho no Launchpad") { model.createShortcut(for: program, in: bottle) }
                             Button("Mostrar no Finder") {
                                 NSWorkspace.shared.activateFileViewerSelecting([program.url])
                             }

@@ -42,9 +42,11 @@ swift build
 swift run Vinho
 swift test            # testes do WineKit
 
-# Gerar um Vinho.app (universal, assinatura ad-hoc)
+# Gerar um Vinho.app (universal, ícone, assinatura ad-hoc)
 scripts/bundle.sh
-open build/Vinho.app
+
+# …e instalar em ~/Applications com atalho na Mesa
+scripts/bundle.sh --install
 ```
 
 > O app **não** deve ser sandboxed: ele precisa executar o Wine e acessar os bottles.
@@ -84,11 +86,11 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] `wine --version` em background para exibir versão
 - [ ] Catálogo remoto (JSON) para atualizar versões sem novo release do app
 
-**Fase 3 — Experiência**
-- [ ] Ícones reais extraídos dos `.exe` (recursos PE `RT_GROUP_ICON`)
-- [ ] Atalhos no Launchpad/Dock por programa (mini `.app` que chama o Vinho)
-- [ ] Snapshots APFS de bottle (antes de instalar) e rollback
-- [ ] Importar/exportar bottle (`.vinhobottle` = tar.zst)
+**Fase 3 — Experiência** ✅
+- [x] Ícones reais extraídos dos `.exe` (recursos PE `RT_GROUP_ICON`) e dos atalhos `.lnk`
+- [x] Atalhos no Launchpad/Spotlight/Dock (`~/Applications/Vinho/<Programa>.app`)
+- [x] Snapshots de bottle (clone APFS), automáticos antes de instaladores, com restauração
+- [x] Exportar/importar bottle (`.vinhobottle`, tar.gz)
 
 **Fase 4 — Perfis abertos**
 - [ ] Receitas YAML de instalação (dependências winetricks, overrides, env) por app/jogo

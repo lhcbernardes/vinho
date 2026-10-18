@@ -17,6 +17,8 @@ struct VinhoApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("Novo Bottle…") { model.isCreatingBottle = true }
                     .keyboardShortcut("n")
+                Button("Importar Bottle…") { model.importBottle() }
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
             }
             CommandMenu("Bottle") {
                 Button("Executar Programa…") { model.isPickingProgram = true }
