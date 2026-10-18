@@ -3,39 +3,20 @@ import SwiftUI
 import WineKit
 
 struct SettingsView: View {
-    @Environment(AppModel.self) private var model
-
     var body: some View {
-        @Bindable var model = model
+        TabView {
+            GeneralSettingsView()
+                .tabItem { Label("Geral", systemImage: "gearshape") }
+            RuntimesView()
+                .tabItem { Label("Runtimes", systemImage: "shippingbox") }
+        }
+        .frame(width: 640, height: 520)
+    }
+}
 
+private struct GeneralSettingsView: View {
+    var body: some View {
         Form {
-            Section("Runtimes Wine") {
-                if model.runtimes.isEmpty {
-                    Text("Nenhum runtime encontrado.").foregroundStyle(.secondary)
-                } else {
-                    Picker("Padrão para novos bottles", selection: $model.defaultRuntimeID) {
-                        ForEach(model.runtimes) { Text($0.displayName).tag(Optional($0.id)) }
-                    }
-                    ForEach(model.runtimes) { runtime in
-                        LabeledContent(runtime.displayName) {
-                            Text(runtime.capabilities.isEmpty
-                                 ? "WineD3D apenas"
-                                 : runtime.capabilities.map(\.rawValue).sorted().joined(separator: " · "))
-                                .foregroundStyle(.secondary)
-                        }
-                        .help(runtime.rootURL.path)
-                    }
-                }
-                HStack {
-                    Button("Abrir pasta de runtimes") {
-                        let dir = RuntimeLocator.managedRuntimesDirectory
-                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                        NSWorkspace.shared.open(dir)
-                    }
-                    Button("Procurar de novo") { Task { await model.refresh() } }
-                }
-            }
-
             Section("Armazenamento") {
                 LabeledContent("Bottles", value: VinhoPaths.bottles.path)
                     .textSelection(.enabled)
@@ -58,6 +39,5 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 420)
     }
 }

@@ -26,6 +26,13 @@ final class AppModel {
     var isCreatingBottle = false
     var isPickingProgram = false
 
+    /// Instalações em andamento, por id do runtime/variante.
+    var installs: [String: InstallProgress] = [:]
+    /// `wine --version` dos runtimes sem arquivo VERSION.
+    var probedVersions: [String: String] = [:]
+    let catalog = Catalog.builtIn
+    private var installTasks: [String: Task<Void, Never>] = [:]
+
     var defaultRuntimeID: String? {
         didSet { UserDefaults.standard.set(defaultRuntimeID, forKey: "defaultRuntimeID") }
     }
@@ -63,6 +70,7 @@ final class AppModel {
 
     func refresh() async {
         runtimes = locator.discover()
+        probeMissingVersions()
         do {
             bottles = try await manager.list()
             if selection == nil || selectedBottle == nil { selection = bottles.first?.id }
@@ -86,7 +94,9 @@ final class AppModel {
     // MARK: Bottles
 
     func createBottle(name: String, windows: WindowsVersion, graphics: GraphicsBackend) async {
-        guard let runtime = defaultRuntime else { return show(WineError.noRuntimeAvailable) }
+        guard let runtime = bestRuntime(for: graphics, current: defaultRuntime) ?? defaultRuntime else {
+            return show(WineError.noRuntimeAvailable)
+        }
         busyMessage = "Criando “\(name)”… (o primeiro wineboot leva alguns segundos)"
         defer { busyMessage = nil }
         do {
@@ -118,6 +128,11 @@ final class AppModel {
         let previous = current.settings
         var updated = current
         change(&updated.settings)
+        // O backend gráfico efetivo vem do runtime: troca para um que o suporte.
+        if updated.settings.graphics != previous.graphics,
+           let match = bestRuntime(for: updated.settings.graphics, current: runtime(for: current)) {
+            updated.settings.runtimeID = match.id
+        }
         guard updated.settings != previous else { return }
         do {
             try await manager.save(updated)
@@ -158,6 +173,111 @@ final class AppModel {
             if !s.pinnedPrograms.contains(url.path) { s.pinnedPrograms.append(url.path) }
         }
         rescanPrograms()
+    }
+
+    // MARK: Runtimes
+
+    func isInstalled(_ descriptor: RuntimeDescriptor) -> Bool {
+        runtimes.contains { $0.id == descriptor.id }
+    }
+
+    func isManaged(_ runtime: WineRuntime) -> Bool {
+        runtime.rootURL.standardizedFileURL.path
+            .hasPrefix(RuntimeLocator.managedRuntimesDirectory.standardizedFileURL.path + "/")
+    }
+
+    func displayVersion(_ runtime: WineRuntime) -> String? {
+        runtime.version ?? probedVersions[runtime.id]
+    }
+
+    /// Componentes do catálogo que fazem sentido adicionar a este runtime.
+    func availableComponents(for runtime: WineRuntime) -> [ComponentDescriptor] {
+        catalog.components.filter { c in
+            !runtime.capabilities.contains(c.kind)
+                && !runtimes.contains { $0.id == RuntimeInstaller.variantID(base: runtime, component: c) }
+        }
+    }
+
+    /// Prefere o runtime atual; senão, o primeiro que suporta o backend.
+    /// Para WineD3D, prefere um runtime sem camadas extras.
+    func bestRuntime(for backend: GraphicsBackend, current: WineRuntime?) -> WineRuntime? {
+        if backend == .wined3d {
+            if let current, current.capabilities.isEmpty { return current }
+            return runtimes.first { $0.capabilities.isEmpty } ?? current
+        }
+        if let current, current.supports(backend) { return current }
+        return runtimes.first { $0.supports(backend) }
+    }
+
+    func install(_ descriptor: RuntimeDescriptor) {
+        startInstall(id: descriptor.id, label: "\(descriptor.name) \(descriptor.version)") { installer, progress in
+            try await installer.install(descriptor, progress: progress)
+        }
+    }
+
+    func addComponent(_ component: ComponentDescriptor, to base: WineRuntime) {
+        let id = RuntimeInstaller.variantID(base: base, component: component)
+        startInstall(id: id, label: "\(component.name) em \(base.id)") { installer, progress in
+            try await installer.makeVariant(of: base, with: component, progress: progress)
+        }
+    }
+
+    func cancelInstall(_ id: String) {
+        installTasks[id]?.cancel()
+    }
+
+    func uninstall(_ runtime: WineRuntime) async {
+        let users = bottles.filter { $0.settings.runtimeID == runtime.id }.map(\.name)
+        guard users.isEmpty else {
+            errorMessage = "“\(runtime.id)” está em uso por: \(users.joined(separator: ", ")). Troque o runtime desses bottles antes."
+            return
+        }
+        do {
+            try RuntimeInstaller().uninstall(runtime)
+            if defaultRuntimeID == runtime.id { defaultRuntimeID = nil }
+            await refresh()
+        } catch {
+            show(error)
+        }
+    }
+
+    private func startInstall(
+        id: String,
+        label: String,
+        _ work: @escaping @Sendable (RuntimeInstaller, @escaping @Sendable (InstallProgress) -> Void) async throws -> URL
+    ) {
+        guard installs[id] == nil else { return }
+        installs[id] = InstallProgress(phase: .downloading, fraction: 0)
+
+        installTasks[id] = Task {
+            let installer = RuntimeInstaller()
+            do {
+                try FileManager.default.createDirectory(at: installer.runtimesDirectory, withIntermediateDirectories: true)
+                _ = try await work(installer) { progress in
+                    Task { @MainActor [weak self] in
+                        // Ignora callbacks que chegam depois do fim.
+                        if self?.installs[id] != nil { self?.installs[id] = progress }
+                    }
+                }
+                installs[id] = nil
+                await refresh()
+                if defaultRuntimeID == nil { defaultRuntimeID = id }
+            } catch is CancellationError {
+                installs[id] = nil
+            } catch {
+                installs[id] = nil
+                errorMessage = "Falha ao instalar \(label): " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+            installTasks[id] = nil
+        }
+    }
+
+    private func probeMissingVersions() {
+        for runtime in runtimes where runtime.version == nil && probedVersions[runtime.id] == nil {
+            Task {
+                if let v = await WineRunner.probeVersion(runtime) { probedVersions[runtime.id] = v }
+            }
+        }
     }
 
     // MARK: Execução

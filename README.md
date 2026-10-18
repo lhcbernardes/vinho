@@ -14,37 +14,22 @@ sobre o Wine, inspirado na experiência do CrossOver, construído do zero.
 
 ## Runtime Wine
 
-O Vinho não embute o Wine; ele procura runtimes em:
+Na primeira execução o Vinho oferece **Baixar e instalar** o Wine Stable.
+Em **Ajustes ▸ Runtimes** dá para:
 
-1. `~/Library/Application Support/Vinho/Runtimes/<nome>/` (precisa ter `bin/wine` ou `bin/wine64`)
-2. `/Applications/Wine*.app` e `~/Applications/Wine*.app` (layout `Contents/Resources/wine`)
+- instalar outros builds (Stable / Devel / Staging, builds Gcenx) — download verificado por **SHA-256**;
+- **adicionar DXMT ou DXVK** a um runtime: o Vinho cria uma *variante*
+  (`wine-stable-11.0_1+dxmt-v0.80`) via clone APFS, sem alterar o original;
+- remover runtimes instalados pelo Vinho (vão para o Lixo).
 
-> Os casks oficiais (`wine-stable`, `wine@devel`, `wine@staging`) foram desativados
-> pelo Homebrew em 01/09/2026, e o `gcenx/wine/wine-crossover` não existe mais.
+Ao escolher um backend gráfico num bottle, o Vinho troca automaticamente
+para um runtime que o suporte.
 
-**Opção A — Wine 11 (apps em geral, gráficos via WineD3D):**
+**D3DMetal** (Apple GPTK) não pode ser redistribuído; instale com
+`brew install --cask gcenx/wine/game-porting-toolkit` e o Vinho detecta.
 
-```bash
-scripts/install-runtime.sh devel 11.16
-```
-
-**Opção B — Game Porting Toolkit (jogos DX11/DX12 via D3DMetal):**
-
-```bash
-brew install --cask gcenx/wine/game-porting-toolkit
-```
-
-Instala `/Applications/Game Porting Toolkit.app` (o Vinho detecta). O D3DMetal é
-da Apple — uso pessoal/avaliação; não redistribua.
-
-Recursos detectados automaticamente por runtime:
-
-| Backend | Detectado quando o runtime tem |
-|---|---|
-| D3DMetal | `lib/external/D3DMetal.framework` |
-| DXMT | `lib/dxmt/` ou `lib/wine/x86_64-unix/winemetal.so` |
-| DXVK | `lib/dxvk/` + `libMoltenVK.dylib` |
-| WineD3D | sempre |
+Runtimes ficam em `~/Library/Application Support/Vinho/Runtimes/`.
+Pela linha de comando: `scripts/install-runtime.sh stable 11.0_1`.
 
 ## Build e execução
 
@@ -93,10 +78,11 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 
 ## Roadmap
 
-**Fase 2 — Runtimes gerenciados**
-- [ ] Download/instalação de runtimes (manifesto JSON + verificação SHA-256)
-- [ ] Instalar DXMT/DXVK no `system32` do bottle com um clique
-- [ ] `wine --version` em background para exibir versão
+**Fase 2 — Runtimes gerenciados** ✅
+- [x] Catálogo de runtimes com download verificado por SHA-256, progresso e cancelamento
+- [x] DXMT/DXVK com um clique (variantes de runtime via clone APFS)
+- [x] `wine --version` em background para exibir versão
+- [ ] Catálogo remoto (JSON) para atualizar versões sem novo release do app
 
 **Fase 3 — Experiência**
 - [ ] Ícones reais extraídos dos `.exe` (recursos PE `RT_GROUP_ICON`)

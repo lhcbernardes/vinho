@@ -140,27 +140,32 @@ private struct RosettaBanner: View {
 
 struct RuntimeMissingView: View {
     @Environment(AppModel.self) private var model
-    private let brew = "brew install --cask gcenx/wine/game-porting-toolkit"
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
+        let recommended = model.catalog.recommendedRuntime
         ContentUnavailableView {
-            Label("Nenhum runtime Wine encontrado", systemImage: "shippingbox")
+            Label("Nenhum runtime Wine instalado", systemImage: "shippingbox")
         } description: {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("O Vinho precisa de um build do Wine. Opções:")
-                Text("• Para jogos (D3DMetal), instale o Game Porting Toolkit via Homebrew:")
-                Text(brew).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                Text("• Para apps em geral, rode scripts/install-runtime.sh no projeto (Wine 11), ou coloque um runtime em ~/Library/Application Support/Vinho/Runtimes/<nome>/.")
+            VStack(spacing: 10) {
+                Text("O Vinho precisa de um build do Wine para rodar programas do Windows.")
+                if let recommended {
+                    Text("Recomendado: \(recommended.name) \(recommended.version) · \(ByteCountFormatter.string(fromByteCount: recommended.artifact.size, countStyle: .file))")
+                        .foregroundStyle(.secondary)
+                }
+                if let recommended, let progress = model.installs[recommended.id] {
+                    InstallProgressView(progress: progress) { model.cancelInstall(recommended.id) }
+                        .frame(width: 320)
+                }
             }
-            .frame(maxWidth: 520, alignment: .leading)
         } actions: {
             HStack {
-                Button("Copiar comando") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(brew, forType: .string)
+                if let recommended, model.installs[recommended.id] == nil {
+                    Button("Baixar e instalar") { model.install(recommended) }
+                        .buttonStyle(.borderedProminent)
                 }
+                Button("Outras opções…") { openSettings() }
                 Button("Procurar de novo") { Task { await model.refresh() } }
-                    .buttonStyle(.borderedProminent)
             }
         }
     }

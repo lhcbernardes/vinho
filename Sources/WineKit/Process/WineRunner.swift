@@ -59,17 +59,7 @@ public struct WineRunner: Sendable {
     }
 
     public func runToCompletion(_ invocation: WineInvocation) async throws -> ProcessResult {
-        var out: [String] = []
-        var err: [String] = []
-        var code: Int32 = -1
-        for try await event in launcher.run(invocation) {
-            switch event {
-            case .stdout(let line): out.append(line)
-            case .stderr(let line): err.append(line)
-            case .exited(let c): code = c
-            }
-        }
-        return ProcessResult(command: invocation.commandLine, exitCode: code, stdout: out, stderr: err)
+        try await launcher.collect(invocation)
     }
 
     public func runToCompletion(_ arguments: [String], in bottle: Bottle) async throws -> ProcessResult {
@@ -98,6 +88,18 @@ public struct WineRunner: Sendable {
     public func waitForServer(_ bottle: Bottle) async throws {
         let inv = invocation(["-w"], in: bottle, executable: runtime.wineserverURL)
         _ = try await runToCompletion(inv)
+    }
+
+    /// `wine --version` (não precisa de prefixo).
+    public static func probeVersion(_ runtime: WineRuntime, launcher: any ProcessLaunching = FoundationProcessLauncher()) async -> String? {
+        let inv = WineInvocation(
+            executable: runtime.wineURL,
+            arguments: ["--version"],
+            environment: ["PATH": "\(runtime.binURL.path):/usr/bin:/bin", "WINEDEBUG": "-all"]
+        )
+        guard let result = try? await launcher.collect(inv), result.exitCode == 0,
+              let line = result.stdout.first(where: { !$0.isEmpty }) else { return nil }
+        return line.trimmingCharacters(in: .whitespaces)
     }
 
     /// `wineserver -k`: mata todos os processos do bottle.

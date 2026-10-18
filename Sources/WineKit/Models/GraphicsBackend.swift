@@ -45,7 +45,7 @@ public enum GraphicsBackend: String, Codable, CaseIterable, Sendable, Identifiab
         switch self {
         case .d3dMetal: "DirectX 11/12 → Metal (Apple GPTK)"
         case .dxmt: "DirectX 10/11 → Metal (open source)"
-        case .dxvk: "DirectX 9/10/11 → Vulkan → Metal"
+        case .dxvk: "DirectX 10/11 → Vulkan → Metal (DXVK-macOS, legado)"
         case .wined3d: "DirectX → OpenGL (compatibilidade máxima)"
         }
     }
@@ -62,16 +62,18 @@ public enum GraphicsBackend: String, Codable, CaseIterable, Sendable, Identifiab
 
     /// DLLs que este backend controla e como devem ser carregadas.
     ///
-    /// - D3DMetal: o runtime GPTK substitui as DLLs builtin do Wine.
-    /// - DXMT/DXVK: as DLLs nativas são instaladas no `system32` do bottle.
+    /// Todos os backends são *builtin*: D3DMetal vem no runtime GPTK e
+    /// DXMT/DXVK são instalados numa variante do runtime (veja
+    /// `RuntimeInstaller.makeVariant`). Por isso o backend efetivo é
+    /// decidido pelo runtime do bottle.
     public var dllOverrides: [String: DLLOverrideMode] {
         switch self {
         case .d3dMetal:
             ["dxgi": .builtin, "d3d9": .builtin, "d3d10core": .builtin, "d3d11": .builtin, "d3d12": .builtin]
         case .dxmt:
-            ["dxgi": .nativeThenBuiltin, "d3d10core": .nativeThenBuiltin, "d3d11": .nativeThenBuiltin]
+            ["dxgi": .builtin, "d3d10core": .builtin, "d3d11": .builtin, "winemetal": .builtin]
         case .dxvk:
-            ["dxgi": .nativeThenBuiltin, "d3d9": .nativeThenBuiltin, "d3d10core": .nativeThenBuiltin, "d3d11": .nativeThenBuiltin]
+            ["d3d10core": .builtin, "d3d11": .builtin]
         case .wined3d:
             ["dxgi": .builtin, "d3d9": .builtin, "d3d10core": .builtin, "d3d11": .builtin]
         }

@@ -53,6 +53,23 @@ public protocol ProcessLaunching: Sendable {
     func run(_ invocation: WineInvocation) -> AsyncThrowingStream<ProcessEvent, Error>
 }
 
+extension ProcessLaunching {
+    /// Executa até o fim e coleta stdout/stderr.
+    public func collect(_ invocation: WineInvocation) async throws -> ProcessResult {
+        var out: [String] = []
+        var err: [String] = []
+        var code: Int32 = -1
+        for try await event in run(invocation) {
+            switch event {
+            case .stdout(let line): out.append(line)
+            case .stderr(let line): err.append(line)
+            case .exited(let c): code = c
+            }
+        }
+        return ProcessResult(command: invocation.commandLine, exitCode: code, stdout: out, stderr: err)
+    }
+}
+
 /// Implementação real baseada em `Foundation.Process`.
 public struct FoundationProcessLauncher: ProcessLaunching {
     public init() {}

@@ -97,6 +97,10 @@ public struct RuntimeLocator: Sendable {
         if exists("lib/dxvk") && (exists("lib/libMoltenVK.dylib") || exists("lib64/libMoltenVK.dylib")) {
             caps.insert(.dxvk)
         }
+        // Componentes instalados pelo Vinho (variantes de runtime).
+        if let manifest = RuntimeComponentsManifest.read(from: root) {
+            caps.formUnion(manifest.components.map(\.kind))
+        }
         return caps
     }
 

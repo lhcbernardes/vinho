@@ -22,14 +22,14 @@ final class GraphicsAndEnvironmentTests: XCTestCase {
         XCTAssertEqual(env["PATH"], "/opt/wine/bin:/usr/bin")
         XCTAssertEqual(env["WINEMSYNC"], "1")
         XCTAssertEqual(env["WINEDEBUG"], "-all")
-        XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("d3d11=n,b"))
+        XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("d3d11=b"))
         XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("mscoree="))
     }
 
     func testUserOverridesWinOverBackend() {
-        let b = bottle { $0.dllOverrides = ["d3d11": .builtin]; $0.environment = ["WINEDEBUG": "+all"] }
+        let b = bottle { $0.dllOverrides = ["d3d11": .native]; $0.environment = ["WINEDEBUG": "+all"] }
         let env = WineEnvironment.make(bottle: b, runtime: runtime, base: [:])
-        XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("d3d11=b"))
+        XCTAssertTrue(env["WINEDLLOVERRIDES"]!.contains("d3d11=n;"))
         XCTAssertEqual(env["WINEDEBUG"], "+all")
     }
 

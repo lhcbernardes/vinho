@@ -9,6 +9,11 @@ public enum WineError: Error, LocalizedError, Equatable {
     case invalidBottleName
     case notABottle(path: String)
     case backendUnsupported(backend: GraphicsBackend, runtime: String)
+    case downloadFailed(reason: String)
+    case checksumMismatch(expected: String, actual: String)
+    case invalidArchive(reason: String)
+    case alreadyInstalled(id: String)
+    case notManagedRuntime(id: String)
 
     public var errorDescription: String? {
         switch self {
@@ -28,6 +33,16 @@ public enum WineError: Error, LocalizedError, Equatable {
             "\(path) não é um bottle do Vinho."
         case .backendUnsupported(let backend, let runtime):
             "O runtime \"\(runtime)\" não suporta \(backend.displayName)."
+        case .downloadFailed(let reason):
+            "Falha no download: \(reason)"
+        case .checksumMismatch(let expected, let actual):
+            "O arquivo baixado está corrompido ou foi alterado (SHA-256 esperado \(expected.prefix(12))…, obtido \(actual.prefix(12))…)."
+        case .invalidArchive(let reason):
+            "Pacote inválido: \(reason)"
+        case .alreadyInstalled(let id):
+            "\"\(id)\" já está instalado."
+        case .notManagedRuntime(let id):
+            "\"\(id)\" não foi instalado pelo Vinho e não pode ser removido por aqui."
         }
     }
 }

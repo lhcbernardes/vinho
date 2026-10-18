@@ -185,12 +185,16 @@ private struct BottleSettingsForm: View {
             Section {
                 Picker("Backend gráfico", selection: binding(\.graphics)) {
                     ForEach(GraphicsBackend.allCases) { backend in
-                        let ok = runtime?.supports(backend) ?? false
+                        let ok = model.runtimes.contains { $0.supports(backend) }
                         Text(ok ? backend.displayName : "\(backend.displayName) (indisponível)")
                             .tag(backend)
                     }
                 }
                 Text(bottle.settings.graphics.summary).font(.caption).foregroundStyle(.secondary)
+                if let runtime, !runtime.supports(bottle.settings.graphics) {
+                    Text("O runtime atual não inclui \(bottle.settings.graphics.displayName). Adicione-o em Ajustes ▸ Runtimes.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 Toggle("HUD de performance (Metal)", isOn: binding(\.metalHUD))
                 Toggle("Modo Retina (alta resolução)", isOn: binding(\.retinaMode))
             } header: {
