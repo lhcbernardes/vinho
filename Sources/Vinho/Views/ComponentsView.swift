@@ -16,7 +16,7 @@ struct ComponentsView: View {
                 Section {
                     Label {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Falta o cabextract (usado para extrair os instaladores da Microsoft).")
+                            Text("Falta o cabextract (usado para extrair os instaladores da Microsoft). Os builds do Vinho já trazem um; nesta cópia, instale pelo Homebrew.")
                             Text("brew install cabextract").font(.system(.caption, design: .monospaced))
                         }
                     } icon: {

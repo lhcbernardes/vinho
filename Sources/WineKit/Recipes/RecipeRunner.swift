@@ -80,6 +80,7 @@ public struct RecipeRunner: Sendable {
 
             case .winetricks(let verbs):
                 guard let winetricks = winetricksURL else { throw RecipeError.winetricksMissing }
+                WinetricksManager.prepareTools()
                 let invocation = wine.invocation(
                     ["-q"] + verbs, in: bottle, executable: winetricks,
                     environment: [

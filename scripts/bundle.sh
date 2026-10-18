@@ -41,6 +41,23 @@ if [[ -f "$ICON_SRC" ]]; then
   rm -rf "$(dirname "$ICONSET")"
 fi
 
+# cabextract embutido (o winetricks precisa dele). Usa o do Homebrew se ele
+# só depender de bibliotecas do sistema; senão o Vinho procura em runtime.
+CAB="$(command -v cabextract || true)"
+if [[ -n "$CAB" ]]; then
+  CAB="$(readlink -f "$CAB" 2>/dev/null || python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$CAB")"
+  if ! otool -L "$CAB" | tail -n +2 | grep -qv -e '/usr/lib/' -e '/System/'; then
+    mkdir -p "$APP/Contents/Resources/bin"
+    cp "$CAB" "$APP/Contents/Resources/bin/cabextract"
+    chmod 755 "$APP/Contents/Resources/bin/cabextract"
+    echo "✓ cabextract embutido ($(cabextract --version 2>/dev/null | head -1))"
+  else
+    echo "⚠️  cabextract do Homebrew depende de bibliotecas externas; não embutido"
+  fi
+else
+  echo "ℹ️  cabextract não encontrado (brew install cabextract para embuti-lo)"
+fi
+
 VERSION="$(git describe --tags --always 2>/dev/null || echo 0.1.0)"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

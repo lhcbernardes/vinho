@@ -208,6 +208,7 @@ final class AppModel {
             var settings = BottleSettings(name: name, runtimeID: runtime.id, windowsVersion: windows, graphics: graphics)
             preset?.apply(to: &settings)
             if !runtime.supports(settings.graphics) { settings.graphics = .wined3d }
+            settings.preparedRuntime = WineRunner.fingerprint(runtime, version: displayVersion(runtime))
             let bottle = try await manager.create(settings)
             let runner = WineRunner(runtime: runtime)
             log(bottle.id, "Inicializando prefixo com \(runtime.displayName)…")
@@ -217,6 +218,7 @@ final class AppModel {
             await refresh()
             selection = bottle.id
             rescanPrograms()
+            await integrateWithMac(bottle)
             return bottle
         } catch {
             show(error)
@@ -263,6 +265,7 @@ final class AppModel {
             if let runtime = runtime(for: bottle) {
                 try? await WineRunner(runtime: runtime).killAll(bottle)
             }
+            await removeMacIntegration(bottle)
             try await manager.delete(bottle)
             try? snapshotManager.deleteAll(for: bottle)
             snapshots[bottle.id] = nil
@@ -574,7 +577,7 @@ final class AppModel {
         isShowingRecipes = false
         // Epic/GOG vão para o bottle de jogos (o da Steam), se houver.
         var target = target
-        if target == nil, entry.recipe.provides.contains(where: { $0 == "epic" || $0 == "gog" }) {
+        if target == nil, entry.recipe.provides.contains(where: { ["epic", "gog", "battlenet"].contains($0) }) {
             target = LauncherPlanner.steamBottle(in: bottles)
         }
         recipeTask = Task { [target] in
@@ -625,6 +628,8 @@ final class AppModel {
             }
             log(bottle.id, "✅ \(recipe.name) instalado.")
             if let notes = recipe.notes { log(bottle.id, "ℹ️ \(notes)") }
+            for tip in recipe.guide ?? [] where recipe.game == nil { log(bottle.id, "💡 \(tip)") }
+            await integrateWithMac(bottle)
             if recipe.provides.contains("steam") {
                 ensureSharedLibrary()
                 await applySteamOverrides(bottle)
@@ -1045,6 +1050,7 @@ final class AppModel {
         runningCount[id, default: 0] += 1
 
         Task {
+            await preparePrefixIfNeeded(bottle)
             do {
                 for try await event in runner.run(invocation) {
                     switch event {
@@ -1059,6 +1065,10 @@ final class AppModel {
             runningCount[id, default: 1] -= 1
             // A Steam pode ter terminado de baixar um jogo: cria o atalho dele.
             if Steam.isInstalled(in: bottle) { await syncSteamLibrary(bottle) }
+            // Um instalador pode ter criado atalhos no Menu Iniciar e tipos de arquivo.
+            if Self.looksLikeInstaller(URL(fileURLWithPath: label + ".exe")) && recipeRun == nil {
+                await integrateWithMac(bottle)
+            }
             rescanPrograms() // um instalador pode ter criado novos atalhos
             // Instalou a Steam "na mão" (arrastando o SteamSetup.exe)? Mostra o guia.
             if label.lowercased().hasPrefix("steamsetup"), Steam.isInstalled(in: bottle), recipeRun == nil {

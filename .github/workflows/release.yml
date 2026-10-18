@@ -20,6 +20,9 @@ jobs:
       - name: Testes
         run: swift test
 
+      - name: cabextract (embutido no app)
+        run: brew install cabextract
+
       - name: Bundle
         run: scripts/bundle.sh
 

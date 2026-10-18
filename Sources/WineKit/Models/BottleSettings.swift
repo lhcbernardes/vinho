@@ -102,6 +102,17 @@ public struct BottleSettings: Codable, Hashable, Sendable {
     /// Avaliação de compatibilidade por programa (caminho Unix → nota).
     public var compatibility: [String: CompatibilityRating]
     public var createdAt: Date
+    /// Integração com o Mac: atalhos do Menu Iniciar no Launchpad, "Abrir com"
+    /// no Finder e arquivos/links abrindo nos apps do Mac.
+    public var macIntegration: Bool = true
+    /// Apps gerados pela integração (para remover quando o programa sumir).
+    public var integratedApps: [String] = []
+    /// `runtimeID|versão` com que o prefixo foi atualizado pela última vez.
+    public var preparedRuntime: String?
+    /// D3DMetal: DLSS do jogo vira upscaling MetalFX.
+    public var dlssMetalFX: Bool = false
+    /// Rosetta anuncia AVX/AVX2 (jogos que exigem AVX).
+    public var advertiseAVX: Bool = false
 
     public init(
         name: String,
@@ -147,6 +158,7 @@ public struct BottleSettings: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, name, runtimeID, windowsVersion, graphics, sync, logLevel
         case retinaMode, metalHUD, environment, dllOverrides, pinnedPrograms, shortcuts, windowsComponents, debugChannels, gameProfiles, installedRecipes, compatibility, createdAt
+        case macIntegration, integratedApps, preparedRuntime, dlssMetalFX, advertiseAVX
     }
 
     public init(from decoder: Decoder) throws {
@@ -171,5 +183,10 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         installedRecipes = (try? c.decodeIfPresent([String: Int].self, forKey: .installedRecipes)) ?? [:]
         compatibility = (try? c.decodeIfPresent([String: CompatibilityRating].self, forKey: .compatibility)) ?? [:]
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        macIntegration = (try? c.decodeIfPresent(Bool.self, forKey: .macIntegration)) ?? true
+        integratedApps = (try? c.decodeIfPresent([String].self, forKey: .integratedApps)) ?? []
+        preparedRuntime = try? c.decodeIfPresent(String.self, forKey: .preparedRuntime)
+        dlssMetalFX = (try? c.decodeIfPresent(Bool.self, forKey: .dlssMetalFX)) ?? false
+        advertiseAVX = (try? c.decodeIfPresent(Bool.self, forKey: .advertiseAVX)) ?? false
     }
 }

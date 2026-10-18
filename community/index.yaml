@@ -8,6 +8,7 @@ recipes:
   - recipes/left-4-dead-2.yaml
   - recipes/epic-games-launcher.yaml
   - recipes/gog-galaxy.yaml
+  - recipes/battle-net.yaml
   - recipes/portal-2.yaml
   - recipes/half-life-2.yaml
   - recipes/team-fortress-2.yaml

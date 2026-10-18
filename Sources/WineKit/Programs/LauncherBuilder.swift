@@ -65,7 +65,7 @@ public enum LauncherBuilder {
         return key.allSatisfy { $0 == "_" || ($0.isASCII && ($0.isLetter || $0.isNumber)) }
     }
 
-    static func sanitize(_ name: String) -> String {
+    public static func sanitize(_ name: String) -> String {
         let cleaned = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? "Programa" : cleaned

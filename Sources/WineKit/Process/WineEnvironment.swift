@@ -50,6 +50,9 @@ public enum WineEnvironment {
             if s.graphics == .dxvk { env["DXVK_HUD"] = "fps,devinfo" }
         }
 
+        if s.advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }
+        if s.dlssMetalFX && s.graphics == .d3dMetal { env["D3DM_ENABLE_METALFX"] = "1" }
+
         if s.graphics == .d3dMetal {
             // Necessário para que o loader encontre o D3DMetal.framework nos builds GPTK.
             let external = runtime.libURL.appendingPathComponent("external").path

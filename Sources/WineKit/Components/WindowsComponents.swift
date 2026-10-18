@@ -156,14 +156,54 @@ public enum WinetricksManager {
         return url
     }
 
-    /// O winetricks precisa do cabextract para quase todos os componentes.
-    public static var cabextractAvailable: Bool {
-        ["/opt/homebrew/bin/cabextract", "/usr/local/bin/cabextract"].contains { FileManager.default.isExecutableFile(atPath: $0) }
+    /// Pasta de ferramentas do Vinho (entra primeiro no PATH do winetricks).
+    public static var toolsBinDirectory: URL {
+        VinhoPaths.applicationSupport.appendingPathComponent("Tools/bin", isDirectory: true)
     }
 
-    /// PATH com Homebrew (o app aberto pelo Finder não herda o PATH do terminal).
+    /// Onde procurar o cabextract: embutido no Vinho.app, Homebrew, ou o que vem
+    /// dentro do CrossOver (se estiver instalado).
+    public static var cabextractCandidates: [URL] {
+        var urls: [URL] = []
+        if let resources = Bundle.main.resourceURL {
+            urls.append(resources.appendingPathComponent("bin/cabextract"))
+        }
+        urls += ["/opt/homebrew/bin/cabextract", "/usr/local/bin/cabextract"].map { URL(fileURLWithPath: $0) }
+        let crossover = "Contents/SharedSupport/CrossOver/bin/cabextract"
+        urls.append(URL(fileURLWithPath: "/Applications/CrossOver.app").appendingPathComponent(crossover))
+        urls.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/CrossOver.app").appendingPathComponent(crossover))
+        return urls
+    }
+
+    public static func findCabextract(in candidates: [URL] = cabextractCandidates) -> URL? {
+        candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    /// O winetricks precisa do cabextract para quase todos os componentes.
+    public static var cabextractAvailable: Bool { findCabextract() != nil }
+
+    /// Liga o cabextract encontrado em `Tools/bin` (sem colocar o resto do
+    /// CrossOver no PATH, que tem outro `wine`).
+    @discardableResult
+    public static func prepareTools(candidates: [URL] = cabextractCandidates, into dir: URL = toolsBinDirectory) -> URL? {
+        let fm = FileManager.default
+        guard let source = findCabextract(in: candidates) else { return nil }
+        let link = dir.appendingPathComponent("cabextract")
+        if let target = try? fm.destinationOfSymbolicLink(atPath: link.path), target == source.path { return link }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? fm.removeItem(at: link)
+        do {
+            try fm.createSymbolicLink(at: link, withDestinationURL: source)
+            return link
+        } catch {
+            return nil
+        }
+    }
+
+    /// PATH com as ferramentas do Vinho e o Homebrew (o app aberto pelo Finder
+    /// não herda o PATH do terminal).
     public static var toolPath: String {
-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        "\(toolsBinDirectory.path):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     }
 }
 

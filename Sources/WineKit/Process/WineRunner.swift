@@ -86,6 +86,18 @@ public struct WineRunner: Sendable {
         try await waitForServer(bottle)
     }
 
+    /// `wineboot -u`: atualiza o prefixo depois de trocar a versão do Wine
+    /// (DLLs, registro padrão, wine.inf) — o equivalente ao cxupgrade.
+    public func updatePrefix(_ bottle: Bottle) async throws {
+        try await runToCompletion(["wineboot", "-u"], in: bottle).check()
+        try await waitForServer(bottle)
+    }
+
+    /// Identifica o runtime com que o prefixo foi preparado.
+    public static func fingerprint(_ runtime: WineRuntime, version: String?) -> String {
+        "\(runtime.id)|\(version ?? runtime.version ?? "?")"
+    }
+
     /// Aplica as configurações que vivem dentro do prefixo (registro, versão do Windows).
     public func apply(_ settings: BottleSettings, previous: BottleSettings?, to bottle: Bottle) async throws {
         let commands = WineConfigurator.commands(for: settings, previous: previous)

@@ -73,6 +73,7 @@ struct BottleDetailView: View {
                     Button("Executar comando…") { model.isRunningCommand = true }
                     Divider()
                     Button("Abrir drive C: no Finder") { model.openDriveC(bottle) }
+                    Button("Atualizar integração com o Mac") { Task { await model.integrateWithMac(bottle, announce: true) } }
                     Divider()
                     Button("Encerrar todos os processos") { Task { await model.killAllInSelectedBottle() } }
                 } label: {
@@ -233,6 +234,14 @@ private struct BottleSettingsForm: View {
                     Text("O runtime atual não inclui \(bottle.settings.graphics.displayName). Adicione-o em Ajustes ▸ Runtimes.")
                         .font(.caption).foregroundStyle(.orange)
                 }
+                if bottle.settings.graphics == .d3dMetal {
+                    Toggle("DLSS → MetalFX", isOn: Binding(
+                        get: { bottle.settings.dlssMetalFX },
+                        set: { on in Task { await model.setDLSSMetalFX(on, for: bottle) } }
+                    ))
+                    Text("Jogos com DLSS usam o upscaling MetalFX da Apple. Ligue o DLSS nas opções do jogo. Requer Game Porting Toolkit 3+.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Toggle("HUD de performance (Metal)", isOn: binding(\.metalHUD))
                 Toggle("Modo Retina (alta resolução)", isOn: binding(\.retinaMode))
             } header: {
@@ -243,10 +252,37 @@ private struct BottleSettingsForm: View {
                 Picker("Sincronização", selection: binding(\.sync)) {
                     ForEach(SyncMode.allCases) { Text($0.displayName).tag($0) }
                 }
+                Toggle("Anunciar AVX/AVX2 (Rosetta)", isOn: binding(\.advertiseAVX))
+                Text("Para jogos que recusam abrir sem AVX. Requer macOS 15 ou mais novo.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Log do Wine", selection: binding(\.logLevel)) {
                     ForEach(WineLogLevel.allCases) { Text($0.displayName).tag($0) }
                 }
                 DebugChannelsField(bottle: bottle)
+            }
+
+            Section {
+                Toggle("Integrar com o Mac", isOn: Binding(
+                    get: { bottle.settings.macIntegration },
+                    set: { on in Task { await model.setMacIntegration(on, for: bottle) } }
+                ))
+                Text("Atalhos do Menu Iniciar viram apps no Launchpad, programas que abrem documentos aparecem no “Abrir com” do Finder e links/PDFs/imagens abrem nos apps do Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if bottle.settings.macIntegration {
+                    HStack {
+                        Text("\(bottle.settings.integratedApps.count) app(s) em ~/Applications/Vinho/\(bottle.name)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Atualizar agora") { Task { await model.integrateWithMac(bottle, announce: true) } }
+                        Button("Mostrar") {
+                            let dir = MacIntegration.appsDirectory(for: bottle)
+                            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                            NSWorkspace.shared.open(dir)
+                        }
+                    }
+                }
+            } header: {
+                Text("Integração com o Mac")
             }
 
             Section("Runtime") {

@@ -72,13 +72,14 @@ public enum SteamLibraryScanner {
 
 /// Launchers de loja que o Vinho sabe instalar e abrir.
 public enum GameLauncher: String, CaseIterable, Sendable {
-    case steam, epic, gog
+    case steam, epic, gog, battlenet
 
     public var displayName: String {
         switch self {
         case .steam: "Steam"
         case .epic: "Epic Games Launcher"
         case .gog: "GOG Galaxy"
+        case .battlenet: "Battle.net"
         }
     }
 
@@ -88,6 +89,7 @@ public enum GameLauncher: String, CaseIterable, Sendable {
         case .steam: #"C:\Program Files (x86)\Steam\steam.exe"#
         case .epic: #"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe"#
         case .gog: #"C:\Program Files (x86)\GOG Galaxy\GalaxyClient.exe"#
+        case .battlenet: #"C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe"#
         }
     }
 
@@ -101,6 +103,8 @@ public enum GameLauncher: String, CaseIterable, Sendable {
         case .steam: SteamFixes.launchArguments
         case .epic: ["-opengl", "-SkipBuildPatchPrereq"]
         case .gog: ["--disable-gpu"]
+        // A Blizzard ignora flags do CEF; a aceleração é desligada nas configurações dela.
+        case .battlenet: []
         }
     }
 

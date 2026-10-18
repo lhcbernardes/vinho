@@ -79,7 +79,15 @@ simplifica: tudo em Swift, `Process` direto.
 | Atualização automática | `AppUpdater` (releases do GitHub, 1×/dia) |
 | Executar comando, canais de debug, duplicar bottle | ⇧⌘O, campo “Canais de debug”, ⇧⌘D |
 
+| cxmenu / cxassoc / cxnativeopen | Integração com o Mac (`MacIntegration`): apps em `~/Applications/Vinho/<bottle>/`, applets com `CFBundleDocumentTypes`, `winebrowser` → `/usr/bin/open` |
+| cabextract embutido | `Contents/Resources/bin/cabextract` (release) ou o do CrossOver/Homebrew |
+| cxupgrade | `wineboot -u` na primeira execução após trocar o runtime |
+| bottle_templates | `BottleTemplate` na criação do bottle |
+| DLSS (MetalFX), Battle.net | `D3DM_ENABLE_METALFX` + nvngx no system32; receita `battle-net` |
+
 ### Ainda faltando
 - D3DMetal próprio: o Vinho usa o do Game Porting Toolkit instalado pelo usuário (a licença da Apple não permite redistribuir).
 - EA app e Ubisoft Connect (anti-cheat e CEF ainda instáveis no Wine do macOS).
 - Wine Gecko (o domínio da WineHQ não está no allowlist usado no desenvolvimento; o mshtml segue desativado).
+- Impressão (cxps2pdf): o Wine do macOS já imprime pelo CUPS; falta só um atalho “Salvar como PDF”.
+- Catálogo C4P/CrossTie (conteúdo da CodeWeavers) — o equivalente aberto são as receitas.

@@ -116,6 +116,11 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] **Abrir .exe/.msi/.lnk pelo Finder** (Abrir com ▸ Vinho) e **bottle padrão** (★)
 - [x] **Atualização automática** do app pelas releases do GitHub
 - [x] **Executar comando** com argumentos (⇧⌘O), **canais de debug** com predefinições e **duplicar bottle** (⇧⌘D)
+- [x] **Integração com o Mac**: Menu Iniciar → Launchpad, programas no "Abrir com" do Finder (tipos de arquivo do registro) e links/PDFs/imagens abrindo nos apps do Mac
+- [x] **cabextract embutido** no Vinho.app (ou o do CrossOver/Homebrew, se houver)
+- [x] **Atualização do prefixo** (`wineboot -u`) ao trocar de versão do Wine
+- [x] **Modelos de bottle**: Aplicativos, Office/.NET, Jogos DX9–11, Jogos DX12, Jogos antigos
+- [x] **Battle.net**, **DLSS → MetalFX** (D3DMetal) e **AVX no Rosetta**
 - [x] Workflow **Wine runtime (CrossOver)** — compila o Wine com os patches da CodeWeavers a partir do código-fonte (experimental)
 
 **Fase 5 — Comunidade** ✅

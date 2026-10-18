@@ -3,7 +3,7 @@
 /// Os arquivos equivalentes ficam em `community/recipes/`.
 enum BuiltInRecipes {
     static let yaml: [String] = [
-        notepadPlusPlus, sevenZip, steam, epicGames, gogGalaxy,
+        notepadPlusPlus, sevenZip, steam, epicGames, gogGalaxy, battleNet,
         left4Dead2, portal2, halfLife2, teamFortress2, counterStrike2, ghostOfTsushima,
     ]
 
@@ -239,5 +239,31 @@ enum BuiltInRecipes {
       - O download tem cerca de 75 GB; a biblioteca S: fica na pasta do seu Mac, não dentro do bottle.
       - O jogo pede login na PlayStation Network só para o modo online (Legends); a campanha roda sem.
       - Comece no preset Baixo e com escala de resolução (FSR/XeSS) ativada.
+    """#
+    // A Blizzard não publica hash do instalador.
+    static let battleNet = #"""
+    id: battle-net
+    name: Battle.net
+    revision: 1
+    category: game
+    description: Launcher da Blizzard (Diablo, Overwatch, StarCraft, Hearthstone…).
+    provides: [battlenet]
+    homepage: https://www.blizzard.com/apps/battle.net/desktop
+    notes: Ao fim da instalação o Battle.net abre sozinho; faça login e feche-o para o Vinho criar o atalho.
+    bottle:
+      windows: win10
+      graphics: dxmt
+    steps:
+      - download:
+          url: https://downloader.battle.net/download/getInstaller?os=win&installer=Battle.net-Setup.exe
+          file: Battle.net-Setup.exe
+      - run:
+          file: Battle.net-Setup.exe
+    launch:
+      program: 'C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe'
+      name: Battle.net
+    guide:
+      - Se a janela ficar preta ou piscando, abra Configurações ▸ Aplicativo e desmarque “Usar aceleração de hardware do navegador”.
+      - Jogos com DirectX 12 (Diablo IV, Overwatch 2) precisam do Game Porting Toolkit.
     """#
 }
