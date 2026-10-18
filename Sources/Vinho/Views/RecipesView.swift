@@ -154,7 +154,7 @@ private struct InstallRecipeSheet: View {
 
     private var gamePlan: (bottle: Bottle?, family: GraphicsFamily)? {
         guard let game = entry.recipe.game else { return nil }
-        return (LauncherPlanner.steamBottle(for: game.family, in: model.bottles), game.family)
+        return (LauncherPlanner.steamBottle(in: model.bottles), game.family)
     }
 
     private var stepTitles: [String] {
@@ -162,9 +162,10 @@ private struct InstallRecipeSheet: View {
         guard let game = recipe.game, let plan = gamePlan else { return recipe.steps.map(\.title) }
         var titles: [String] = []
         if target == nil && plan.bottle == nil {
-            titles.append("Criar o bottle “\(plan.family.steamBottleName())” e instalar a Steam")
+            titles.append("Criar o bottle “\(GraphicsFamily.steamBottleName)” e instalar a Steam (uma vez só)")
         }
         titles += recipe.steps.map(\.title)
+        if game.exeName != nil { titles.append("Aplicar as configurações só deste jogo (\(game.exeName ?? ""))") }
         titles.append("Abrir a Steam pedindo o app \(game.appid) (\(recipe.name))")
         titles.append("Criar o atalho “\(recipe.launch?.name ?? recipe.name)” com o ícone do jogo")
         titles.append("Mostrar o guia de próximos passos")
@@ -179,11 +180,11 @@ private struct InstallRecipeSheet: View {
 
             if let plan = gamePlan {
                 Picker("Onde", selection: $target) {
-                    Text(plan.bottle.map { "Automático (\($0.name))" } ?? "Automático (novo “\(plan.family.steamBottleName())”)")
+                    Text(plan.bottle.map { "Steam em “\($0.name)”" } ?? "Nova Steam (bottle “\(GraphicsFamily.steamBottleName)”)")
                         .tag(Bottle.ID?.none)
                     ForEach(steamBottles) { Text($0.name).tag(Optional($0.id)) }
                 }
-                Text("Jogos da Steam ficam num bottle de Steam compartilhado. \(recipe.name) é \(plan.family.displayName), então vai para o bottle de Steam \(plan.family.displayName). A Steam só é instalada se ainda não existir.")
+                Text("Todos os jogos usam a mesma Steam; cada jogo tem as próprias configurações. \(recipe.name) é \(plan.family.displayName)\(plan.family == .dx12 ? " e precisa de uma Steam no runtime Game Porting Toolkit" : "").")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {

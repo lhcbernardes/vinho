@@ -5,3 +5,4 @@
 /Packages/
 *.xcodeproj/xcuserdata/
 DerivedData/
+/Tools/steamwebhelper-wrapper/*.exe

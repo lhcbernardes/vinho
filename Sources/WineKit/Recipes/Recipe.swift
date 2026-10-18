@@ -113,6 +113,9 @@ public struct Recipe: Decodable, Identifiable, Hashable, Sendable {
             if let dx = game.directx, ![9, 10, 11, 12].contains(dx) {
                 throw RecipeError.invalid("game.directx deve ser 9, 10, 11 ou 12")
             }
+            for (dll, value) in game.profile?.dllOverrides ?? [:] where DLLOverrideMode(recipeValue: value) == nil {
+                throw RecipeError.invalid("override inválido em game.profile: \(dll)=\(value)")
+            }
         }
 
         var files = Set<String>()
@@ -207,8 +210,33 @@ public struct GameSpec: Decodable, Hashable, Sendable {
     public var exe: String?
     public var directx: Int?
     public var launchOptions: String?
+    /// Ajustes só deste jogo (aplicados por executável, dentro da Steam compartilhada).
+    public var profile: GameProfilePreset?
 
     public var family: GraphicsFamily { GraphicsFamily(directX: directx) }
+
+    /// `Left 4 Dead 2\left4dead2.exe` → `left4dead2.exe`
+    public var exeName: String? {
+        exe?.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init)
+    }
+
+    /// Perfil inicial do jogo a partir da receita.
+    public func makeProfile() -> GameProfile? {
+        guard let exeName else { return nil }
+        var overrides: [String: DLLOverrideMode] = [:]
+        for (dll, value) in profile?.dllOverrides ?? [:] {
+            if let mode = DLLOverrideMode(recipeValue: value) { overrides[dll] = mode }
+        }
+        return GameProfile(exeName: exeName, dllOverrides: overrides, renderer: profile?.renderer,
+                           retina: profile?.retina, launchOptions: launchOptions)
+    }
+}
+
+/// `game.profile` na receita.
+public struct GameProfilePreset: Decodable, Hashable, Sendable {
+    public var renderer: WineD3DRenderer?
+    public var retina: Bool?
+    public var dllOverrides: [String: String]?
 }
 
 public struct Requirements: Decodable, Hashable, Sendable {

@@ -100,7 +100,9 @@ Bottles ficam em `~/Library/Application Support/Vinho/Bottles/`.
 - [x] Relatórios de compatibilidade ("Funcionou?") como issues pré-preenchidas no GitHub
 
 **Launchers e jogos** ✅
-- [x] Receitas de jogo (`game: { store: steam, appid, directx }`) instaladas no bottle de Steam certo (DX9–11 ou DX12), criado sob demanda
+- [x] Uma Steam só para todos os jogos, com **perfil por jogo** (renderer, Retina, DLLs via Wine AppDefaults)
+- [x] Correção automática da tela preta da Steam (wrapper do steamwebhelper em `Tools/`)
+- [x] Receitas de jogo (`game: { store: steam, appid, directx, profile }`)
 - [x] Biblioteca de jogos compartilhada entre os bottles de Steam
 - [x] Guia "Próximos passos" que se marca sozinho (login, biblioteca, download) e aviso no bottle quando há pendências
 - [x] Detecção da Steam instalada manualmente (arrastando o SteamSetup.exe)

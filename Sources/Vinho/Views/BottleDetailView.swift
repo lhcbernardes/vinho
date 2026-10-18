@@ -49,10 +49,15 @@ struct BottleDetailView: View {
                 .help("Executar um .exe, .msi ou .lnk neste bottle")
 
                 if Steam.isInstalled(in: bottle) {
-                    Button { model.guide = GuideState(kind: .steam, bottleID: bottle.id) } label: {
-                        Label("Guia da Steam", systemImage: "list.bullet.clipboard")
+                    Menu {
+                        Button("Abrir Steam") { Task { await model.openSteam(in: bottle) } }
+                        Button("Corrigir tela preta e reabrir") { Task { await model.fixSteam(bottle) } }
+                        Divider()
+                        Button("Guia da Steam…") { model.guide = GuideState(kind: .steam, bottleID: bottle.id) }
+                    } label: {
+                        Label("Steam", systemImage: "gamecontroller")
                     }
-                    .help("Próximos passos: login, biblioteca compartilhada e dicas")
+                    .help("Abrir, corrigir e ver os próximos passos da Steam")
                 }
 
                 Menu {
@@ -163,6 +168,11 @@ private struct ProgramsGrid: View {
                         .help(([WindowsPath.from(program.url, in: bottle)] + program.arguments).joined(separator: " "))
                         .contextMenu {
                             Button("Executar") { model.launch(program, in: bottle) }
+                            if let profileID = program.profileID {
+                                Button("Configurações do jogo…") {
+                                    model.editingProfile = ProfileEditing(bottleID: bottle.id, profileID: profileID)
+                                }
+                            }
                             if program.kind == .custom {
                                 Button("Remover atalho") { Task { await model.removeShortcut(program, from: bottle) } }
                             } else {

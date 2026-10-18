@@ -10,13 +10,16 @@ public struct Program: Identifiable, Hashable, Sendable {
     public let displayName: String?
     /// Executável/ícone de onde extrair o ícone (padrão: `url`).
     public let iconURL: URL?
+    /// Perfil de jogo associado (id da receita), se houver.
+    public let profileID: String?
 
-    public init(url: URL, kind: Kind, arguments: [String] = [], displayName: String? = nil, iconURL: URL? = nil) {
+    public init(url: URL, kind: Kind, arguments: [String] = [], displayName: String? = nil, iconURL: URL? = nil, profileID: String? = nil) {
         self.url = url
         self.kind = kind
         self.arguments = arguments
         self.displayName = displayName
         self.iconURL = iconURL
+        self.profileID = profileID
     }
 
     /// Único mesmo para dois atalhos do mesmo executável com argumentos diferentes.
@@ -38,19 +41,24 @@ public struct ProgramShortcut: Codable, Hashable, Sendable {
     /// Jogo da Steam: exe relativo a `steamapps\common` — o ícone é achado em
     /// qualquer biblioteca, inclusive na compartilhada.
     public var steamGameExe: String?
+    /// Perfil de jogo associado (id da receita).
+    public var profileID: String?
 
-    public init(name: String, program: String, arguments: [String] = [], icon: String? = nil, steamGameExe: String? = nil) {
+    public init(name: String, program: String, arguments: [String] = [], icon: String? = nil,
+                steamGameExe: String? = nil, profileID: String? = nil) {
         self.name = name
         self.program = program
         self.arguments = arguments
         self.icon = icon
         self.steamGameExe = steamGameExe
+        self.profileID = profileID
     }
 
     /// Resolve o ícone dinamicamente (jogos da Steam podem estar em outra biblioteca).
     public func program(in bottle: Bottle) -> Program {
         let iconURL = steamGameExe.flatMap { Steam.gameExecutable($0, in: bottle) } ?? icon.map { URL(fileURLWithPath: $0) }
-        return Program(url: URL(fileURLWithPath: program), kind: .custom, arguments: arguments, displayName: name, iconURL: iconURL)
+        return Program(url: URL(fileURLWithPath: program), kind: .custom, arguments: arguments,
+                       displayName: name, iconURL: iconURL, profileID: profileID)
     }
 
     public var asProgram: Program {

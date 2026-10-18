@@ -90,6 +90,8 @@ public struct BottleSettings: Codable, Hashable, Sendable {
     public var pinnedPrograms: [String]
     /// Atalhos personalizados (programa + argumentos), exibidos antes dos demais.
     public var shortcuts: [ProgramShortcut]
+    /// Perfis por jogo (id da receita → perfil aplicado via AppDefaults).
+    public var gameProfiles: [String: GameProfile]
     /// Receitas instaladas neste bottle (id → revisão).
     public var installedRecipes: [String: Int]
     /// Avaliação de compatibilidade por programa (caminho Unix → nota).
@@ -109,6 +111,7 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         dllOverrides: [String: DLLOverrideMode] = [:],
         pinnedPrograms: [String] = [],
         shortcuts: [ProgramShortcut] = [],
+        gameProfiles: [String: GameProfile] = [:],
         installedRecipes: [String: Int] = [:],
         compatibility: [String: CompatibilityRating] = [:],
         createdAt: Date = Date()
@@ -126,6 +129,7 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         self.dllOverrides = dllOverrides
         self.pinnedPrograms = pinnedPrograms
         self.shortcuts = shortcuts
+        self.gameProfiles = gameProfiles
         self.installedRecipes = installedRecipes
         self.compatibility = compatibility
         self.createdAt = createdAt
@@ -133,7 +137,7 @@ public struct BottleSettings: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, name, runtimeID, windowsVersion, graphics, sync, logLevel
-        case retinaMode, metalHUD, environment, dllOverrides, pinnedPrograms, shortcuts, installedRecipes, compatibility, createdAt
+        case retinaMode, metalHUD, environment, dllOverrides, pinnedPrograms, shortcuts, gameProfiles, installedRecipes, compatibility, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -152,6 +156,7 @@ public struct BottleSettings: Codable, Hashable, Sendable {
         dllOverrides = (try? c.decodeIfPresent([String: DLLOverrideMode].self, forKey: .dllOverrides)) ?? [:]
         pinnedPrograms = try c.decodeIfPresent([String].self, forKey: .pinnedPrograms) ?? []
         shortcuts = (try? c.decodeIfPresent([ProgramShortcut].self, forKey: .shortcuts)) ?? []
+        gameProfiles = (try? c.decodeIfPresent([String: GameProfile].self, forKey: .gameProfiles)) ?? [:]
         installedRecipes = (try? c.decodeIfPresent([String: Int].self, forKey: .installedRecipes)) ?? [:]
         compatibility = (try? c.decodeIfPresent([String: CompatibilityRating].self, forKey: .compatibility)) ?? [:]
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()

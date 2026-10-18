@@ -388,17 +388,24 @@ final class SteamAndGuideTests: XCTestCase {
         XCTAssertEqual(GraphicsFamily(directX: 12), .dx12)
         XCTAssertEqual(GraphicsFamily(directX: nil), .classic)
         XCTAssertEqual(GraphicsFamily.dx12.preferredBackend, .d3dMetal)
-        XCTAssertEqual(GraphicsFamily.classic.steamBottleName(), "Steam (DX9–11)")
+        XCTAssertEqual(GraphicsFamily.steamBottleName, "Steam")
     }
 
-    func testPlannerPicksSteamBottleOfTheRightFamily() throws {
+    func testPlannerUsesASingleSteamAndPrefersGPTK() throws {
         let noSteam = try bottle("Office", steam: false)
-        let classic = try bottle("Steam", steam: true)
-        let dx12 = try bottle("Steam DX12", graphics: .d3dMetal, steam: true)
-        let all = [noSteam, classic, dx12]
-        XCTAssertEqual(LauncherPlanner.steamBottle(for: .classic, in: all)?.name, "Steam")
-        XCTAssertEqual(LauncherPlanner.steamBottle(for: .dx12, in: all)?.name, "Steam DX12")
-        XCTAssertNil(LauncherPlanner.steamBottle(for: .dx12, in: [noSteam, classic]))
+        var steam = try bottle("Steam", steam: true)
+        steam.settings.installedRecipes = ["left-4-dead-2": 2]
+        let other = try bottle("Steam velha", steam: true)
+        XCTAssertEqual(LauncherPlanner.steamBottle(in: [noSteam, other, steam])?.name, "Steam", "a que já tem jogos")
+        XCTAssertNil(LauncherPlanner.steamBottle(in: [noSteam]))
+
+        let wine = WineRuntime(id: "wine", rootURL: URL(fileURLWithPath: "/w"), capabilities: [.dxmt])
+        let gptk = WineRuntime(id: "gptk", rootURL: URL(fileURLWithPath: "/g"), capabilities: [.d3dMetal])
+        XCTAssertEqual(LauncherPlanner.preferredSteamBackend(runtimes: [wine]), .dxmt)
+        XCTAssertEqual(LauncherPlanner.preferredSteamBackend(runtimes: [wine, gptk]), .d3dMetal)
+        XCTAssertTrue(LauncherPlanner.runtime(wine, supports: .classic))
+        XCTAssertFalse(LauncherPlanner.runtime(wine, supports: .dx12))
+        XCTAssertTrue(LauncherPlanner.runtime(gptk, supports: .dx12))
     }
 
     func testLibraryFoldersParsingAndGameLookupInSecondaryLibrary() throws {
@@ -433,13 +440,21 @@ final class SteamAndGuideTests: XCTestCase {
         XCTAssertEqual(items.first { $0.id == "steam-installed" }?.status, .done)
         XCTAssertEqual(items.first { $0.id == "steam-login" }?.status, .todo)
         XCTAssertEqual(items.first { $0.id == "steam-library" }?.status, .todo)
-        XCTAssertEqual(items.first { $0.id == "steam-library" }?.action, .copy(#"C:\Shared Library"#))
-        XCTAssertEqual(GuideBuilder.pendingCount(items), 2)
+        XCTAssertEqual(items.first { $0.id == "steam-library" }?.action, .mountSharedLibrary, "S: ainda não montado")
+        try Steam.mountSharedLibrary(shared, in: b)
+        XCTAssertTrue(Steam.isSharedLibraryMounted(shared, in: b))
+        XCTAssertEqual(GuideBuilder.steam(bottle: b, sharedLibrary: shared).first { $0.id == "steam-library" }?.action, .mountSharedLibrary)
+        XCTAssertEqual(items.first { $0.id == "steam-fix" }?.status, .todo)
+        XCTAssertEqual(GuideBuilder.pendingCount(items), 3)
 
         try write(#""users" { "1" { "AccountName" "leandro" } }"#,
                   Steam.directory(in: b).appendingPathComponent("config/loginusers.vdf"))
         try write(#""libraryfolders" { "1" { "path" "C:\\Shared Library" } }"#,
                   Steam.directory(in: b).appendingPathComponent("steamapps/libraryfolders.vdf"))
+
+        let cef = Steam.directory(in: b).appendingPathComponent("bin/cef/cef.win7x64")
+        try write("REAL", cef.appendingPathComponent("steamwebhelper.exe"))
+        try SteamFixes.deployWebHelperWrapper(in: b)
 
         items = GuideBuilder.steam(bottle: b, sharedLibrary: shared)
         XCTAssertEqual(items.first { $0.id == "steam-login" }?.status, .done)
@@ -483,5 +498,199 @@ final class SteamAndGuideTests: XCTestCase {
         XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: steam, appid: 10, exe: '..\\x.exe' }"))
         XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: steam, appid: 10, directx: 8 }"))
         XCTAssertThrowsError(try Recipe.parse("id: g\nname: G\ngame: { store: origin, appid: 10 }"))
+    }
+}
+
+final class SteamFixesAndProfileTests: XCTestCase {
+    private var root: URL!
+    private let fm = FileManager.default
+
+    override func setUpWithError() throws {
+        root = fm.temporaryDirectory.appendingPathComponent("vinho-fix-\(UUID().uuidString)")
+    }
+
+    override func tearDownWithError() throws {
+        try? fm.removeItem(at: root)
+    }
+
+    private func write(_ data: Data, _ url: URL) throws {
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: url)
+    }
+
+    func testEmbeddedWrapperIsAWindowsExecutable() {
+        let data = SteamWebHelperWrapper.data
+        XCTAssertEqual(data.prefix(2), Data("MZ".utf8))
+        XCTAssertEqual(data.count, 16_384)
+    }
+
+    func testWrapperDeployIsIdempotentAndSurvivesSteamUpdates() throws {
+        let bottle = Bottle(url: root, settings: BottleSettings(name: "Steam"))
+        let x64 = Steam.directory(in: bottle).appendingPathComponent("bin/cef/cef.win7x64")
+        let x86 = Steam.directory(in: bottle).appendingPathComponent("bin/cef/cef.win7")
+        try write(Data("REAL-1".utf8), x64.appendingPathComponent("steamwebhelper.exe"))
+        try write(Data("REAL-32".utf8), x86.appendingPathComponent("steamwebhelper.exe"))
+        let wrapper = Data("WRAPPER".utf8)
+
+        XCTAssertFalse(SteamFixes.isWrapperDeployed(in: bottle))
+        XCTAssertEqual(try SteamFixes.deployWebHelperWrapper(in: bottle, wrapper: wrapper), 1, "só a pasta 64-bit")
+        XCTAssertEqual(try Data(contentsOf: x64.appendingPathComponent("steamwebhelper.exe")), wrapper)
+        XCTAssertEqual(try Data(contentsOf: x64.appendingPathComponent(SteamFixes.originalName)), Data("REAL-1".utf8))
+        XCTAssertEqual(try Data(contentsOf: x86.appendingPathComponent("steamwebhelper.exe")), Data("REAL-32".utf8))
+
+        XCTAssertEqual(try SteamFixes.deployWebHelperWrapper(in: bottle, wrapper: wrapper), 0, "idempotente")
+
+        // A Steam se atualizou e trouxe um helper novo: ele vira o original.
+        try write(Data("REAL-2".utf8), x64.appendingPathComponent("steamwebhelper.exe"))
+        XCTAssertEqual(try SteamFixes.deployWebHelperWrapper(in: bottle, wrapper: wrapper), 1)
+        XCTAssertEqual(try Data(contentsOf: x64.appendingPathComponent(SteamFixes.originalName)), Data("REAL-2".utf8))
+    }
+
+    func testRemoveWrapperRestoresOriginal() throws {
+        let bottle = Bottle(url: root, settings: BottleSettings(name: "Steam"))
+        let x64 = Steam.directory(in: bottle).appendingPathComponent("bin/cef/cef.win7x64")
+        try write(Data("REAL".utf8), x64.appendingPathComponent("steamwebhelper.exe"))
+        try SteamFixes.deployWebHelperWrapper(in: bottle)
+        XCTAssertTrue(SteamFixes.isWrapperDeployed(in: bottle))
+        try SteamFixes.removeWebHelperWrapper(in: bottle)
+        XCTAssertEqual(try Data(contentsOf: x64.appendingPathComponent("steamwebhelper.exe")), Data("REAL".utf8))
+        XCTAssertFalse(fm.fileExists(atPath: x64.appendingPathComponent(SteamFixes.originalName).path))
+    }
+
+    func testClearStaleLocks() throws {
+        let bottle = Bottle(url: root, settings: BottleSettings(name: "Steam"))
+        let cache = Steam.directory(in: bottle).appendingPathComponent("config/htmlcache")
+        for name in ["SingletonLock", "SingletonCookie", "Cookies"] {
+            try write(Data(), cache.appendingPathComponent(name))
+        }
+        XCTAssertEqual(SteamFixes.clearStaleLocks(in: bottle), 2)
+        XCTAssertTrue(fm.fileExists(atPath: cache.appendingPathComponent("Cookies").path))
+    }
+
+    func testProfileFromRecipeAndRegistryCommands() throws {
+        let recipe = try Recipe.parse("""
+        id: jogo
+        name: Jogo
+        game:
+          store: steam
+          appid: 10
+          exe: 'Jogo\\Bin\\jogo.exe'
+          launchOptions: "-vulkan"
+          profile: { renderer: vulkan, retina: true, dllOverrides: { xinput1_3: native } }
+        """)
+        let profile = try XCTUnwrap(recipe.game?.makeProfile())
+        XCTAssertEqual(profile.exeName, "jogo.exe")
+        XCTAssertEqual(profile.launchOptions, "-vulkan")
+
+        let base = #"HKCU\Software\Wine\AppDefaults\jogo.exe"#
+        XCTAssertEqual(WineConfigurator.commands(for: profile, previous: nil), [
+            ["reg", "add", base + #"\DllOverrides"#, "/v", "xinput1_3", "/t", "REG_SZ", "/d", "n", "/f"],
+            ["reg", "add", base + #"\Direct3D"#, "/v", "renderer", "/t", "REG_SZ", "/d", "vulkan", "/f"],
+            ["reg", "add", base + #"\Mac Driver"#, "/v", "RetinaMode", "/t", "REG_SZ", "/d", "y", "/f"],
+        ])
+
+        var changed = profile
+        changed.renderer = nil
+        changed.dllOverrides = [:]
+        XCTAssertEqual(WineConfigurator.commands(for: changed, previous: profile), [
+            ["reg", "delete", base + #"\DllOverrides"#, "/v", "xinput1_3", "/f"],
+            ["reg", "delete", base + #"\Direct3D"#, "/v", "renderer", "/f"],
+        ])
+        XCTAssertTrue(WineConfigurator.commands(for: profile, previous: profile).isEmpty)
+    }
+}
+
+
+final class SharedLibraryDriveTests: XCTestCase {
+    func testMountIsIdempotentAndGamesAreFoundThroughTheDrive() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("vinho-drive-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let bottle = Bottle(url: root.appendingPathComponent("Steam"), settings: BottleSettings(name: "Steam"))
+        let shared = root.appendingPathComponent("Vinho Steam Library")
+
+        try Steam.mountSharedLibrary(shared, in: bottle)
+        try Steam.mountSharedLibrary(shared, in: bottle) // idempotente
+        XCTAssertTrue(Steam.isSharedLibraryMounted(shared, in: bottle))
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: bottle.url.appendingPathComponent("dosdevices/s:").path), shared.path)
+
+        // A Steam registrou S:\SteamLibrary e o jogo foi baixado lá.
+        let vdf = Steam.directory(in: bottle).appendingPathComponent("steamapps/libraryfolders.vdf")
+        try fm.createDirectory(at: vdf.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #""libraryfolders" { "1" { "path" "S:\\SteamLibrary" } }"#.write(to: vdf, atomically: true, encoding: .utf8)
+        XCTAssertTrue(Steam.hasLibrary(onDrive: "s", in: bottle))
+
+        let exe = shared.appendingPathComponent("SteamLibrary/steamapps/common/Left 4 Dead 2/left4dead2.exe")
+        try fm.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
+        fm.createFile(atPath: exe.path, contents: Data())
+        let found = try XCTUnwrap(Steam.gameExecutable(#"Left 4 Dead 2\left4dead2.exe"#, in: bottle))
+        XCTAssertEqual(found.resolvingSymlinksInPath().path, exe.resolvingSymlinksInPath().path)
+    }
+
+    func testDoesNotReplaceARealDrive() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("vinho-drive2-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let bottle = Bottle(url: root, settings: BottleSettings(name: "b"))
+        let real = root.appendingPathComponent("dosdevices/s:")
+        try fm.createDirectory(at: real, withIntermediateDirectories: true)
+        try Steam.mountSharedLibrary(root.appendingPathComponent("lib"), in: bottle)
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: real.path), "pasta real não é trocada")
+    }
+}
+
+final class SteamLibraryRegistrarTests: XCTestCase {
+    private let typical = """
+    "libraryfolders"
+    {
+    \t"0"
+    \t{
+    \t\t"path"\t\t"C:\\\\Program Files (x86)\\\\Steam"
+    \t\t"label"\t\t""
+    \t\t"contentid"\t\t"111"
+    \t\t"apps"
+    \t\t{
+    \t\t\t"228980"\t\t"12345"
+    \t\t}
+    \t}
+    }
+
+    """
+
+    func testAddsNextIndexedBlockBeforeClosingBrace() {
+        XCTAssertEqual(SteamLibraryRegistrar.nextIndex(in: typical), 1)
+        let out = SteamLibraryRegistrar.addingLibrary(#"S:\SteamLibrary"#, contentID: "999", to: typical)
+        XCTAssertEqual(Steam.parseLibraryPaths(out), [#"C:\Program Files (x86)\Steam"#, #"S:\SteamLibrary"#])
+        XCTAssertTrue(out.contains("\t\"1\"\n"))
+        XCTAssertTrue(out.contains("\"contentid\"\t\t\"999\""))
+        XCTAssertTrue(out.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("}"))
+        XCTAssertEqual(SteamLibraryRegistrar.nextIndex(in: out), 2)
+    }
+
+    func testCreatesFileWhenMissing() {
+        let out = SteamLibraryRegistrar.addingLibrary(#"S:\SteamLibrary"#, contentID: "5", to: "")
+        XCTAssertEqual(Steam.parseLibraryPaths(out), [#"C:\Program Files (x86)\Steam"#, #"S:\SteamLibrary"#])
+        XCTAssertEqual(SteamLibraryRegistrar.nextIndex(in: out), 2)
+    }
+
+    func testRegisterEndToEndIsIdempotent() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("vinho-reg-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let bottle = Bottle(url: root.appendingPathComponent("Steam"), settings: BottleSettings(name: "Steam"))
+        let shared = root.appendingPathComponent("Vinho Steam Library")
+        let list = Steam.directory(in: bottle).appendingPathComponent("steamapps/libraryfolders.vdf")
+        try fm.createDirectory(at: list.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try typical.write(to: list, atomically: true, encoding: .utf8)
+
+        try Steam.mountSharedLibrary(shared, in: bottle)
+        XCTAssertFalse(Steam.hasLibrary(onDrive: "s", in: bottle))
+        XCTAssertTrue(try SteamLibraryRegistrar.register(in: bottle, contentID: "42"))
+        XCTAssertTrue(Steam.hasLibrary(onDrive: "s", in: bottle))
+        XCTAssertFalse(try SteamLibraryRegistrar.register(in: bottle), "não duplica")
+
+        let identity = shared.appendingPathComponent("SteamLibrary/steamapps/libraryfolder.vdf")
+        XCTAssertTrue(try String(contentsOf: identity, encoding: .utf8).contains("\"42\""))
+        XCTAssertEqual(Steam.libraryPaths(in: bottle).count, 2)
     }
 }

@@ -43,6 +43,9 @@ struct ContentView: View {
         .sheet(item: $model.guide) { state in
             GuideView(state: state)
         }
+        .sheet(item: $model.editingProfile) { editing in
+            GameProfileSheet(editing: editing)
+        }
         .overlay {
             if let message = model.busyMessage {
                 BusyOverlay(message: message)

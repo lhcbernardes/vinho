@@ -14,6 +14,12 @@ struct GuideState: Identifiable, Equatable {
     var id: String { "\(bottleID.path)|\(kind)" }
 }
 
+struct ProfileEditing: Identifiable, Equatable {
+    let bottleID: Bottle.ID
+    let profileID: String
+    var id: String { "\(bottleID.path)|\(profileID)" }
+}
+
 struct RecipeRunState: Equatable {
     var recipeName: String
     var bottleID: Bottle.ID
@@ -121,6 +127,7 @@ final class AppModel {
     func refresh() async {
         runtimes = locator.discover()
         probeMissingVersions()
+        defer { prepareSteamBottles() }
         do {
             bottles = try await manager.list()
             if selection == nil || selectedBottle == nil { selection = bottles.first?.id }
@@ -370,6 +377,11 @@ final class AppModel {
     }
 
     private func launchNow(_ program: Program, in bottle: Bottle) {
+        // steam.exe (direto ou via atalho de jogo) passa pelas correções da Steam.
+        if program.url.lastPathComponent.lowercased() == "steam.exe", Steam.isInstalled(in: bottle) {
+            Task { await openSteam(in: bottle, url: program.arguments.first) }
+            return
+        }
         let (args, cwd) = WineRunner.launchArguments(for: program)
         run(args, in: bottle, currentDirectory: cwd, label: program.name)
     }
@@ -569,6 +581,7 @@ final class AppModel {
             if let notes = recipe.notes { log(bottle.id, "ℹ️ \(notes)") }
             if recipe.provides.contains("steam") {
                 ensureSharedLibrary()
+                await applySteamOverrides(bottle)
                 guide = GuideState(kind: .steam, bottleID: bottle.id)
             }
             return bottle
@@ -581,37 +594,31 @@ final class AppModel {
         return nil
     }
 
-    /// Jogo de loja: acha (ou cria) o bottle de Steam da família certa,
-    /// pede a instalação na Steam e cria o atalho com o ícone do jogo.
+    /// Jogo de loja: usa a Steam única (cria se não existir), pede a instalação,
+    /// cria o atalho e aplica o perfil só deste jogo.
     private func installGame(_ recipe: Recipe, game: GameSpec, preferred: Bottle?) async {
         let family = game.family
-
-        if family == .dx12 && !runtimes.contains(where: { $0.supports(.d3dMetal) }) {
-            errorMessage = """
-            \(recipe.name) é DirectX 12 e precisa do Game Porting Toolkit (D3DMetal).
-            Instale com: brew install --cask gcenx/wine/game-porting-toolkit
-            Depois clique em “Procurar de novo” em Ajustes ▸ Runtimes.
-            """
-            return
-        }
 
         var bottle: Bottle?
         if let preferred, Steam.isInstalled(in: preferred) {
             bottle = preferred
         } else if preferred == nil {
-            bottle = LauncherPlanner.steamBottle(for: family, in: bottles)
+            bottle = LauncherPlanner.steamBottle(in: bottles)
         }
 
         if bottle == nil {
+            if family == .dx12 && !runtimes.contains(where: { $0.supports(.d3dMetal) }) {
+                errorMessage = Self.gptkMissingMessage(recipe.name)
+                return
+            }
             guard let steam = (recipes + RecipeLibrary.builtIn()).first(where: { $0.recipe.provides.contains("steam") })?.recipe else {
                 errorMessage = "Nenhuma receita fornece a Steam."
                 return
             }
-            log(preferred?.id ?? URL(fileURLWithPath: "/"), "Instalando a Steam primeiro…")
             bottle = await installRegular(
                 steam, into: preferred,
-                bottleName: preferred == nil ? uniqueBottleName(family.steamBottleName()) : nil,
-                graphics: family.preferredBackend
+                bottleName: preferred == nil ? uniqueBottleName(GraphicsFamily.steamBottleName) : nil,
+                graphics: LauncherPlanner.preferredSteamBackend(runtimes: runtimes)
             )
         }
         guard let bottle, Steam.isInstalled(in: bottle) else {
@@ -619,8 +626,12 @@ final class AppModel {
             return
         }
 
-        if GraphicsFamily(bottle: bottle) != family {
-            log(bottle.id, "⚠️ \(recipe.name) é \(family.displayName), mas este bottle é \(GraphicsFamily(bottle: bottle).displayName).")
+        if !LauncherPlanner.runtime(runtime(for: bottle), supports: family) {
+            errorMessage = """
+            \(recipe.name) é DirectX 12, mas a Steam deste Mac está num runtime sem D3DMetal.
+            Instale o Game Porting Toolkit (brew install --cask gcenx/wine/game-porting-toolkit) e reinstale a Steam nele — a biblioteca compartilhada evita baixar os jogos de novo.
+            """
+            return
         }
 
         do {
@@ -630,21 +641,61 @@ final class AppModel {
             return
         }
 
-        let steamExe = Steam.executable(in: bottle)
+        // Perfil só deste jogo (AppDefaults do exe), sem afetar os outros.
+        if let profile = game.makeProfile() {
+            await saveProfile(profile, id: recipe.id, in: bottle)
+        }
+
         await addShortcut(ProgramShortcut(
             name: recipe.launch?.name ?? recipe.name,
-            program: steamExe.path,
+            program: Steam.executable(in: bottle).path,
             arguments: [Steam.runURL(appID: game.appid)],
-            steamGameExe: game.exe
+            steamGameExe: game.exe,
+            profileID: recipe.id
         ), to: bottle)
         await update(bottle) { $0.installedRecipes[recipe.id] = recipe.revision ?? 1 }
 
         selection = bottle.id
         ensureSharedLibrary()
         log(bottle.id, "🎮 Pedindo à Steam para instalar \(recipe.name) (app \(game.appid))…")
-        openSteam(in: bottle, url: Steam.installURL(appID: game.appid))
+        await openSteam(in: bottle, url: Steam.installURL(appID: game.appid))
         guide = GuideState(kind: .game(recipeID: recipe.id), bottleID: bottle.id)
     }
+
+    static func gptkMissingMessage(_ name: String) -> String {
+        """
+        \(name) é DirectX 12 e precisa do Game Porting Toolkit (D3DMetal).
+        Instale com: brew install --cask gcenx/wine/game-porting-toolkit
+        Depois clique em “Procurar de novo” em Ajustes ▸ Runtimes.
+        """
+    }
+
+    // MARK: Perfis de jogo
+
+    func profile(_ id: String, in bottle: Bottle) -> GameProfile? {
+        (bottles.first { $0.id == bottle.id } ?? bottle).settings.gameProfiles[id]
+    }
+
+    /// Salva e aplica no registro só o que mudou no perfil.
+    func saveProfile(_ profile: GameProfile, id: String, in bottle: Bottle) async {
+        let previous = self.profile(id, in: bottle)
+        await update(bottle) { $0.gameProfiles[id] = profile }
+        let commands = WineConfigurator.commands(for: profile, previous: previous)
+        guard !commands.isEmpty, let runtime = runtime(for: bottle) else { return }
+        let runner = WineRunner(runtime: runtime)
+        do {
+            for command in commands {
+                let result = try await runner.runToCompletion(command, in: bottle)
+                // `reg delete` de um valor que não existe não é erro para nós.
+                if command.first == "reg", command.dropFirst().first == "add" { try result.check() }
+            }
+            log(bottle.id, "⚙️ Perfil de \(profile.exeName) aplicado.")
+        } catch {
+            show(error)
+        }
+    }
+
+    var editingProfile: ProfileEditing?
 
     /// Roda os passos de uma receita com progresso no banner.
     private func runSteps(of recipe: Recipe, in bottle: Bottle) async throws {
@@ -700,7 +751,15 @@ final class AppModel {
         guard let bottle = bottles.first(where: { $0.id == bottleID }) else { return }
         switch action {
         case .openSteam(let url):
-            openSteam(in: bottle, url: url)
+            Task { await openSteam(in: bottle, url: url) }
+        case .fixSteam:
+            Task { await fixSteam(bottle) }
+        case .mountSharedLibrary:
+            // Fecha a Steam, monta S:, registra a biblioteca e reabre.
+            Task { await fixSteam(bottle) }
+        case .gameSettings(let id):
+            guide = nil
+            editingProfile = ProfileEditing(bottleID: bottle.id, profileID: id)
         case .copy(let text):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
@@ -714,14 +773,107 @@ final class AppModel {
         }
     }
 
-    /// Abre a Steam do bottle sem esperar (ela fica aberta).
-    func openSteam(in bottle: Bottle, url: String? = nil) {
-        let args = WineRunner.detachedLaunchArguments(for: Steam.executable(in: bottle), extra: url.map { [$0] } ?? [])
-        run(args, in: bottle, currentDirectory: nil, label: "Steam")
+    /// Abre a Steam do bottle sem esperar (ela fica aberta), com as correções
+    /// para o Wine do macOS: wrapper do steamwebhelper, overrides e flags.
+    func openSteam(in bottle: Bottle, url: String? = nil) async {
+        await applySteamOverrides(bottle)
+        let current = bottles.first { $0.id == bottle.id } ?? bottle
+        prepareSharedLibrary(in: current)
+        if (runningCount[current.id] ?? 0) == 0 {
+            SteamFixes.clearStaleLocks(in: current)
+        }
+        do {
+            if try SteamFixes.deployWebHelperWrapper(in: current) > 0 {
+                log(current.id, "🩹 Correção da tela preta da Steam aplicada.")
+            }
+        } catch {
+            log(current.id, "⚠️ Não consegui aplicar a correção da Steam: \(error.localizedDescription)")
+        }
+        let args = WineRunner.detachedLaunchArguments(
+            for: Steam.executable(in: current),
+            extra: SteamFixes.launchArguments + (url.map { [$0] } ?? [])
+        )
+        run(args, in: current, currentDirectory: nil, label: "Steam")
+        if !SteamFixes.isWrapperDeployed(in: current) { watchSteamFirstRun(current) }
+    }
+
+    /// Fecha tudo, reaplica as correções e reabre a Steam.
+    func fixSteam(_ bottle: Bottle) async {
+        if let runtime = runtime(for: bottle) {
+            try? await WineRunner(runtime: runtime).killAll(bottle)
+        }
+        SteamFixes.clearStaleLocks(in: bottle)
+        mountSharedLibrary(in: bottle)
+        // A Steam acabou de ser fechada: seguro escrever na lista de bibliotecas.
+        if (try? SteamLibraryRegistrar.register(in: bottle)) == true {
+            log(bottle.id, "📚 Biblioteca \(SteamLibraryRegistrar.windowsPath()) registrada na Steam.")
+        }
+        await openSteam(in: bottle)
+    }
+
+    private func applySteamOverrides(_ bottle: Bottle) async {
+        let current = bottles.first { $0.id == bottle.id } ?? bottle
+        let missing = SteamFixes.dllOverrides.filter { current.settings.dllOverrides[$0.key] == nil }
+        guard !missing.isEmpty else { return }
+        await update(current) { s in s.dllOverrides.merge(missing) { old, _ in old } }
+    }
+
+    private var steamWatchers: Set<Bottle.ID> = []
+
+    /// Na primeira abertura a Steam baixa o CEF e abre com tela preta. Assim que
+    /// o CEF aparece, aplica a correção e reabre a Steam (uma vez).
+    private func watchSteamFirstRun(_ bottle: Bottle) {
+        guard steamWatchers.insert(bottle.id).inserted else { return }
+        Task {
+            defer { steamWatchers.remove(bottle.id) }
+            for _ in 0..<120 { // até 10 minutos
+                try? await Task.sleep(for: .seconds(5))
+                if !SteamFixes.cefDirectories(in: bottle).isEmpty, !SteamFixes.isWrapperDeployed(in: bottle) {
+                    // Dá tempo da atualização terminar de gravar arquivos.
+                    try? await Task.sleep(for: .seconds(10))
+                    log(bottle.id, "🩹 A Steam terminou de se atualizar; aplicando a correção e reabrindo…")
+                    await fixSteam(bottle)
+                    return
+                }
+                if SteamFixes.isWrapperDeployed(in: bottle) { return }
+            }
+        }
     }
 
     func ensureSharedLibrary() {
         try? FileManager.default.createDirectory(at: VinhoPaths.sharedSteamLibrary, withIntermediateDirectories: true)
+    }
+
+    /// Em todo bottle com Steam: monta o drive S: (bottles antigos também).
+    private func prepareSteamBottles() {
+        for bottle in bottles where Steam.isInstalled(in: bottle) {
+            mountSharedLibrary(in: bottle)
+        }
+    }
+
+    /// Monta o S: e, com a Steam fechada, registra a biblioteca nela.
+    func prepareSharedLibrary(in bottle: Bottle) {
+        mountSharedLibrary(in: bottle)
+        guard (runningCount[bottle.id] ?? 0) == 0, Steam.isSharedLibraryMounted(in: bottle) else { return }
+        do {
+            if try SteamLibraryRegistrar.register(in: bottle) {
+                log(bottle.id, "📚 Biblioteca \(SteamLibraryRegistrar.windowsPath()) registrada na Steam.")
+            }
+        } catch {
+            log(bottle.id, "⚠️ Não consegui registrar a biblioteca S: na Steam: \(error.localizedDescription)")
+        }
+    }
+
+    /// Cria a pasta compartilhada e a monta como drive S: no bottle da Steam.
+    func mountSharedLibrary(in bottle: Bottle) {
+        do {
+            if !Steam.isSharedLibraryMounted(in: bottle) {
+                try Steam.mountSharedLibrary(in: bottle)
+                log(bottle.id, "📁 Biblioteca compartilhada montada como drive S: (\(VinhoPaths.sharedSteamLibrary.path)).")
+            }
+        } catch {
+            log(bottle.id, "⚠️ Não consegui montar o drive S:: \(error.localizedDescription)")
+        }
     }
 
     func cancelRecipe() {

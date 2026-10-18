@@ -12,6 +12,12 @@ public struct GuideItem: Identifiable, Hashable, Sendable {
         case revealFolder(URL)
         /// Abre o atalho com este nome na grade.
         case launchShortcut(String)
+        /// Reaplica as correções da Steam e reinicia ela.
+        case fixSteam
+        /// Monta a biblioteca compartilhada como drive S: e reabre a Steam.
+        case mountSharedLibrary
+        /// Abre as configurações do jogo (id da receita).
+        case gameSettings(String)
     }
 
     public let id: String
@@ -35,8 +41,6 @@ public enum GuideBuilder {
     /// Passos depois de instalar a Steam num bottle.
     public static func steam(bottle: Bottle, sharedLibrary: URL = VinhoPaths.sharedSteamLibrary) -> [GuideItem] {
         let family = GraphicsFamily(bottle: bottle)
-        let other: GraphicsFamily = family == .dx12 ? .classic : .dx12
-        let libraryWindowsPath = WindowsPath.from(sharedLibrary, in: bottle)
         let installed = Steam.isInstalled(in: bottle)
 
         return [
@@ -47,6 +51,15 @@ public enum GuideBuilder {
                 status: installed ? .done : .todo
             ),
             GuideItem(
+                id: "steam-fix",
+                title: "Correção da tela preta",
+                detail: SteamFixes.isWrapperDeployed(in: bottle)
+                    ? "Ativa: a interface da Steam usa renderização por software (o CEF não consegue usar a GPU no Wine)."
+                    : "Na primeira abertura a Steam se atualiza e a janela pode ficar preta. Quando a atualização terminar, o Vinho aplica a correção e reabre a Steam sozinho — ou clique em Corrigir.",
+                status: SteamFixes.isWrapperDeployed(in: bottle) ? .done : .todo,
+                action: .fixSteam, actionLabel: "Corrigir e reabrir"
+            ),
+            GuideItem(
                 id: "steam-login",
                 title: "Faça login na Steam",
                 detail: "Na primeira abertura ela se atualiza sozinha (pode levar alguns minutos) e pede login. Marque “Lembrar senha” para não repetir.",
@@ -55,17 +68,20 @@ public enum GuideBuilder {
             ),
             GuideItem(
                 id: "steam-library",
-                title: "Adicione a biblioteca compartilhada",
-                detail: "Steam ▸ Configurações ▸ Armazenamento ▸ “Adicionar unidade” e escolha \(libraryWindowsPath). Defina como padrão: jogos instalados ali aparecem nos dois bottles de Steam sem baixar de novo.",
-                status: Steam.hasLibrary(sharedLibrary, in: bottle) ? .done : .todo,
-                action: .copy(libraryWindowsPath), actionLabel: "Copiar caminho"
+                title: "Biblioteca compartilhada (drive S:)",
+                detail: Steam.hasLibrary(onDrive: Steam.sharedLibraryDrive, in: bottle) || Steam.hasLibrary(sharedLibrary, in: bottle)
+                    ? "Pronta: os jogos podem ir para S:\\SteamLibrary (a pasta “\(sharedLibrary.lastPathComponent)” do seu Mac). Na janela de instalação de um jogo, escolha o volume S:."
+                    : "O Vinho monta o drive S: e registra a biblioteca na Steam automaticamente quando ela está fechada. Clique para fechar, configurar e reabrir agora.",
+                status: Steam.hasLibrary(onDrive: Steam.sharedLibraryDrive, in: bottle) || Steam.hasLibrary(sharedLibrary, in: bottle) ? .done : .todo,
+                action: .mountSharedLibrary,
+                actionLabel: "Configurar e reabrir a Steam"
             ),
             GuideItem(
-                id: "steam-family",
-                title: "Este bottle é para jogos \(family.displayName)",
+                id: "steam-single",
+                title: "Uma Steam para todos os jogos",
                 detail: family == .dx12
-                    ? "Use este bottle para jogos DirectX 12 (D3DMetal). Jogos DX9–11 rodam melhor no bottle “\(other.steamBottleName())”."
-                    : "Use este bottle para jogos DirectX 9, 10 e 11. Jogos DirectX 12 precisam do bottle “\(other.steamBottleName())” (Game Porting Toolkit).",
+                    ? "Este bottle usa D3DMetal: roda jogos DirectX 9 a 12. Cada jogo tem suas próprias configurações (clique com o botão direito no atalho ▸ Configurações do jogo)."
+                    : "Este bottle roda jogos DirectX 9 a 11. Para DirectX 12, instale o Game Porting Toolkit e crie a Steam nele. Cada jogo tem suas próprias configurações (botão direito no atalho ▸ Configurações do jogo).",
                 status: .tip
             ),
             GuideItem(
@@ -88,13 +104,11 @@ public enum GuideBuilder {
         guard let game = recipe.game else { return [] }
         let exe = game.exe.flatMap { Steam.gameExecutable($0, in: bottle) }
         let downloaded = exe != nil
-        let libraryWindowsPath = WindowsPath.from(sharedLibrary, in: bottle)
-
         var items = [
             GuideItem(
                 id: "game-confirm",
                 title: "Confirme a instalação na janela da Steam",
-                detail: "A Steam abre a janela “Instalar \(recipe.name)”. Em “Local de instalação” escolha \(libraryWindowsPath) se já tiver adicionado a biblioteca compartilhada.",
+                detail: "A Steam abre a janela “Instalar \(recipe.name)”. Em “Local de instalação” escolha S:\\SteamLibrary (biblioteca compartilhada).",
                 status: downloaded ? .done : .todo,
                 action: .openSteam(Steam.installURL(appID: game.appid)), actionLabel: "Abrir instalação"
             ),
@@ -117,6 +131,14 @@ public enum GuideBuilder {
                 action: .copy(options), actionLabel: "Copiar opções"
             ))
         }
+
+        items.append(GuideItem(
+            id: "game-settings",
+            title: "Configurações só deste jogo",
+            detail: "Renderer, Retina e overrides de DLL valem só para \(game.exeName ?? recipe.name) — os outros jogos da mesma Steam não são afetados.",
+            status: .tip,
+            action: .gameSettings(recipe.id), actionLabel: "Configurar"
+        ))
 
         for (index, tip) in (recipe.guide ?? []).enumerated() {
             items.append(GuideItem(id: "recipe-tip-\(index)", title: "Dica", detail: tip, status: .tip))

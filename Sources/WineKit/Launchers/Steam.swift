@@ -36,7 +36,7 @@ public enum GraphicsFamily: String, Codable, Hashable, Sendable, CaseIterable {
         }
     }
 
-    public func steamBottleName() -> String { "Steam (\(displayName))" }
+    public static let steamBottleName = "Steam"
 }
 
 /// Informações sobre a Steam dentro de um bottle (só leitura de arquivos).
@@ -110,6 +110,41 @@ public enum Steam {
             $0.trimmingCharacters(in: CharacterSet(charactersIn: "\\")).caseInsensitiveCompare(expected) == .orderedSame
         }
     }
+
+    /// Letra do drive onde o Vinho monta a biblioteca compartilhada.
+    public static let sharedLibraryDrive = "s"
+
+    /// Alguma biblioteca da Steam está no drive compartilhado (`S:\…`)?
+    /// Ao escolher o drive, a Steam cria `S:\SteamLibrary`.
+    public static func hasLibrary(onDrive letter: String = sharedLibraryDrive, in bottle: Bottle) -> Bool {
+        libraryPaths(in: bottle).contains { $0.lowercased().hasPrefix(letter.lowercased() + ":") }
+    }
+
+    /// Monta `folder` como drive (`dosdevices/s:` → pasta) para a Steam listar
+    /// direto em "Adicionar volume", sem precisar do seletor de pastas do Wine.
+    public static func mountSharedLibrary(_ folder: URL = VinhoPaths.sharedSteamLibrary,
+                                          letter: String = sharedLibraryDrive, in bottle: Bottle) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let dosdevices = bottle.prefixURL.appendingPathComponent("dosdevices", isDirectory: true)
+        try fm.createDirectory(at: dosdevices, withIntermediateDirectories: true)
+        let link = dosdevices.appendingPathComponent("\(letter.lowercased()):")
+        if let target = try? fm.destinationOfSymbolicLink(atPath: link.path) {
+            if URL(fileURLWithPath: target).standardizedFileURL.path == folder.standardizedFileURL.path { return }
+            try fm.removeItem(at: link)
+        } else if fm.fileExists(atPath: link.path) {
+            // Já existe um drive real com essa letra que não é nosso: não mexe.
+            return
+        }
+        try fm.createSymbolicLink(at: link, withDestinationURL: folder)
+    }
+
+    public static func isSharedLibraryMounted(_ folder: URL = VinhoPaths.sharedSteamLibrary,
+                                              letter: String = sharedLibraryDrive, in bottle: Bottle) -> Bool {
+        let link = bottle.prefixURL.appendingPathComponent("dosdevices/\(letter.lowercased()):")
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: link.path) else { return false }
+        return URL(fileURLWithPath: target).standardizedFileURL.path == folder.standardizedFileURL.path
+    }
 }
 
 extension VinhoPaths {
@@ -120,12 +155,26 @@ extension VinhoPaths {
     }
 }
 
-/// Escolhe em qual bottle instalar um jogo de loja.
+/// Escolhe em qual bottle instalar um jogo de loja: uma Steam só para todos.
 public enum LauncherPlanner {
-    /// Bottle com a Steam instalada e da família certa (prefere o que já tem mais receitas).
-    public static func steamBottle(for family: GraphicsFamily, in bottles: [Bottle]) -> Bottle? {
+    /// O bottle de Steam (prefere o que já tem mais jogos/receitas).
+    public static func steamBottle(in bottles: [Bottle]) -> Bottle? {
         bottles
-            .filter { GraphicsFamily(bottle: $0) == family && Steam.isInstalled(in: $0) }
+            .filter { Steam.isInstalled(in: $0) }
             .max { $0.settings.installedRecipes.count < $1.settings.installedRecipes.count }
+    }
+
+    /// Backend para criar a Steam única: D3DMetal (GPTK) cobre DX9 via WineD3D
+    /// e DX11/12 via D3DMetal; sem GPTK, DXMT cobre DX9–11.
+    public static func preferredSteamBackend(runtimes: [WineRuntime]) -> GraphicsBackend {
+        runtimes.contains { $0.supports(.d3dMetal) } ? .d3dMetal : .dxmt
+    }
+
+    /// O runtime consegue rodar jogos desta família?
+    public static func runtime(_ runtime: WineRuntime?, supports family: GraphicsFamily) -> Bool {
+        switch family {
+        case .classic: return runtime != nil
+        case .dx12: return runtime?.supports(.d3dMetal) ?? false
+        }
     }
 }

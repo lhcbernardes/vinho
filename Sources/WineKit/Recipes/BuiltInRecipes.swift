@@ -55,17 +55,15 @@ enum BuiltInRecipes {
     static let steam = #"""
     id: steam
     name: Steam
-    revision: 2
+    revision: 3
     category: game
     description: Loja e biblioteca de jogos da Valve.
     provides: [steam]
     homepage: https://store.steampowered.com
-    notes: Se a janela da Steam ficar preta, troque o backend gráfico para WineD3D.
+    notes: Na primeira abertura a Steam se atualiza; o Vinho aplica a correção da tela preta e reabre a Steam quando terminar.
     bottle:
       windows: win10
       graphics: dxmt
-    requires:
-      capabilities: [dxmt]
     steps:
       - download:
           url: https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe

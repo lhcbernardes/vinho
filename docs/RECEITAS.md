@@ -59,8 +59,9 @@ invertida é literal dentro de aspas simples.
 
 ## Jogos da Steam
 
-Receitas de jogo **não** instalam a Steam nem baixam o jogo: elas descrevem o
-jogo e o Vinho cuida do resto.
+Existe **uma Steam só** (bottle "Steam"), e cada jogo tem um **perfil próprio**.
+Receitas de jogo não instalam a Steam nem baixam o jogo: elas descrevem o jogo
+e o Vinho cuida do resto.
 
 ```yaml
 id: left-4-dead-2
@@ -69,39 +70,42 @@ category: game
 game:
   store: steam
   appid: 550                                # da URL da loja: store.steampowered.com/app/550
-  exe: 'Left 4 Dead 2\left4dead2.exe'       # relativo a steamapps\common — ícone e status do download
-  directx: 9                                # 9/10/11 → bottle "Steam (DX9–11)"; 12 → "Steam (DX12)"
-  launchOptions: "-vulkan"                  # opcional: sugerido no guia, com botão de copiar
-guide:                                      # dicas extras no guia de próximos passos
+  exe: 'Left 4 Dead 2\left4dead2.exe'       # relativo a steamapps\common — ícone, status e perfil
+  directx: 9                                # 12 exige a Steam no runtime Game Porting Toolkit
+  launchOptions: "-vulkan"                  # sugerido no guia e no perfil, com botão de copiar
+  profile:                                  # vale SÓ para este exe (Wine AppDefaults)
+    renderer: gl                            # gl | vulkan (WineD3D)
+    retina: false
+    dllOverrides: { xinput1_3: native }
+guide:
   - O download tem cerca de 13 GB.
-steps: []                                   # opcional: winetricks, registro… rodam no bottle da Steam
 ```
 
 Ao instalar, o Vinho:
 
-1. procura um bottle com a Steam da família certa (**DX9–11** ou **DX12**) e, se não houver,
-   cria `Steam (DX9–11)` ou `Steam (DX12)` usando a receita que tem `provides: [steam]`;
-2. roda os `steps` do jogo (se houver) nesse bottle;
-3. abre `steam://install/<appid>` e cria o atalho com `steam://rungameid/<appid>`;
-4. mostra o **guia de próximos passos**, que se marca sozinho: login feito, biblioteca
-   compartilhada adicionada, download concluído.
+1. usa a Steam existente ou cria o bottle **Steam** (no Game Porting Toolkit se estiver instalado,
+   que cobre DX9 via WineD3D e DX11/12 via D3DMetal; senão Wine + DXMT, que cobre DX9–11);
+2. aplica o perfil do jogo em `HKCU\Software\Wine\AppDefaults\<exe>` — os outros jogos não mudam;
+3. abre `steam://install/<appid>` e cria o atalho `steam://rungameid/<appid>` com o ícone do jogo;
+4. mostra o **guia de próximos passos**, que se marca sozinho.
 
-Jogos DX12 exigem o runtime Game Porting Toolkit (D3DMetal); o Vinho avisa se faltar.
+O perfil pode ser editado depois: botão direito no atalho ▸ **Configurações do jogo…**
+
+### Tela preta da Steam
+
+O CEF da Steam não consegue usar a GPU no Wine do macOS e desenha a janela em
+preto. O Vinho troca o `steamwebhelper.exe` por um wrapper (fonte em
+[`Tools/steamwebhelper-wrapper`](../Tools/steamwebhelper-wrapper)) que acrescenta
+`--disable-gpu --single-process`, abre a Steam com `-noverifyfiles` e força
+`bcrypt`/`ncrypt` builtin e o overlay desligado. A correção é reaplicada a cada
+abertura (a Steam pode desfazê-la ao se atualizar) e, na primeira instalação, o
+Vinho espera a atualização terminar e reabre a Steam sozinho.
 
 ### Biblioteca compartilhada
 
-`~/Games/Vinho Steam Library` é criada automaticamente. Adicione-a nas duas Steams
-(Configurações ▸ Armazenamento) — o guia mostra o caminho `Z:\…` com botão de copiar.
-Jogos instalados ali aparecem nos dois bottles sem baixar de novo, e o atalho acha o
-ícone do jogo em qualquer biblioteca.
-
-### Backend por versão do DirectX
-
-| DirectX | Bottle | Backend |
-|---|---|---|
-| 9 | Steam (DX9–11) | WineD3D (ou `-vulkan` se o jogo trouxer DXVK) |
-| 10 / 11 | Steam (DX9–11) | DXMT |
-| 12 | Steam (DX12) | D3DMetal (Game Porting Toolkit) |
+`~/Games/Vinho Steam Library` é criada automaticamente; o guia mostra o caminho
+`Z:\…` para adicionar em Steam ▸ Configurações ▸ Armazenamento. Útil para
+reaproveitar jogos se um dia precisar de uma segunda Steam (ex.: migrar para o GPTK).
 
 ## Onde o Vinho procura receitas
 
