@@ -77,6 +77,38 @@ jobs:
           test -n "$CONFIGURE" && test -x "$CONFIGURE"
           echo "WINE_SRC=$PWD/$(dirname "$CONFIGURE")" >> "$GITHUB_ENV"
 
+      - name: Ajustes para rodar fora do CrossOver
+        run: |
+          cd "$WINE_SRC"
+          # O CrossOver força o usuário "crossover" (perfil C:\users\crossover). Fora dele
+          # (sem CX_ROOT) volta ao comportamento do Wine normal: o usuário do Mac — senão
+          # bottles existentes "perdem" o perfil (logins da Steam, saves, configurações).
+          python3 - <<'PY'
+          import re
+          def patch(path, old, new, count):
+              src = open(path, encoding="utf-8").read()
+              if src.count(old) != count:
+                  raise SystemExit(f"{path}: esperava {count} ocorrência(s) de {old!r}, achei {src.count(old)}")
+              open(path, "w", encoding="utf-8").write(src.replace(old, new))
+          patch("dlls/advapi32/advapi.c",
+                'if (!getenv( "CX_REPORT_REAL_USERNAME" ))',
+                'if (getenv( "CX_ROOT" ) && !getenv( "CX_REPORT_REAL_USERNAME" ))', 2)
+          src = open("dlls/shell32/shellpath.c", encoding="utf-8").read()
+          old = re.search(r"/\* CrossOver Hack 12735 \*/\s*static const WCHAR userName\[\] = \{[^}]*\};", src)
+          if not old:
+              raise SystemExit("shellpath.c: hack 12735 não encontrado")
+          src = src.replace(old.group(0),
+              "WCHAR userName[MAX_PATH] = L\"crossover\"; DWORD userLen = MAX_PATH;\n"
+              "            if (!getenv( \"CX_ROOT\" )) GetUserNameW( userName, &userLen );")
+          open("dlls/shell32/shellpath.c", "w", encoding="utf-8").write(src)
+          PY
+          grep -n "CX_ROOT" dlls/advapi32/advapi.c dlls/shell32/shellpath.c
+          # Gecko e Mono que este Wine procura: vão junto no pacote (como no CrossOver).
+          # Sem eles o wineboot abre o instalador numa área de trabalho invisível e trava.
+          echo "GECKO_VERSION=$(sed -n 's/^#define[[:space:]]*GECKO_VERSION[[:space:]]*"\(.*\)"/\1/p' dlls/appwiz.cpl/addons.c)" >> "$GITHUB_ENV"
+          echo "MONO_VERSION=$(sed -n 's/^#define[[:space:]]*MONO_VERSION[[:space:]]*"\(.*\)"/\1/p' dlls/appwiz.cpl/addons.c)" >> "$GITHUB_ENV"
+          grep -n "define GECKO_VERSION\|define MONO_VERSION" dlls/appwiz.cpl/addons.c
+
       - name: Configurar
         run: |
           mkdir -p build && cd build
@@ -136,6 +168,14 @@ jobs:
                   if dep.startswith(src + "/"): todo.append(os.path.basename(dep))
           print("bibliotecas:", " ".join(sorted(seen)))
           PY
+          # Gecko (mshtml) e Mono (.NET) compartilhados, em share/wine como no CrossOver.
+          test -n "$GECKO_VERSION" && test -n "$MONO_VERSION"
+          mkdir -p "$DEST/share/wine/gecko" "$DEST/share/wine/mono"
+          for arch in x86 x86_64; do
+            curl -fsSL --retry 3 "https://dl.winehq.org/wine/wine-gecko/$GECKO_VERSION/wine-gecko-$GECKO_VERSION-$arch.tar.xz" | tar -xJ -C "$DEST/share/wine/gecko"
+          done
+          curl -fsSL --retry 3 "https://dl.winehq.org/wine/wine-mono/$MONO_VERSION/wine-mono-$MONO_VERSION-x86.tar.xz" | tar -xJ -C "$DEST/share/wine/mono"
+          ls "$DEST/share/wine/gecko" "$DEST/share/wine/mono"
           touch "$DEST/VINHO_BUNDLED_LIBS"
           echo "$CX_VERSION" > "$DEST/VERSION"
           DYLD_FALLBACK_LIBRARY_PATH="$DEST/lib" "$DEST/bin/wine" --version || true
@@ -164,7 +204,8 @@ jobs:
               },
               "notes": "Experimental: Wine com os patches da CodeWeavers, compilado do código-fonte do CrossOver.",
           }
-          catalog["runtimes"] = [r for r in catalog.get("runtimes", []) if r["id"] != rid] + [entry]
+          # Revisões anteriores da mesma versão saem do catálogo (ficam só na release).
+          catalog["runtimes"] = [r for r in catalog.get("runtimes", []) if not r["id"].startswith(f"wine-cx-{ver}_")] + [entry]
           catalog.setdefault("components", [])
           catalog.setdefault("schemaVersion", 1)
           json.dump(catalog, open("runtimes.json", "w"), indent=2, ensure_ascii=False)
