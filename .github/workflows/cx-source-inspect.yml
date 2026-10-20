@@ -1,0 +1,49 @@
+name: Inspecionar código do CrossOver
+
+# Diagnóstico: baixa o código-fonte da CodeWeavers e mostra trechos com grep.
+# Útil para entender o que o Wine do CrossOver espera do ambiente (CX_ROOT etc.).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão do CrossOver"
+        default: "26.3.0"
+        required: true
+      pattern:
+        description: "Expressão para o grep -E (no diretório do Wine)"
+        default: 'CX_ROOT|CX_BOTTLE|"crossover"|cxmenu|cxassoc|CX_USERNAME'
+        required: true
+      files:
+        description: "Arquivos para imprimir inteiros (separados por espaço, relativos ao Wine)"
+        required: false
+        default: ""
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar
+        run: |
+          curl -fL --retry 3 -o cx.tar.gz "https://media.codeweavers.com/pub/crossover/source/crossover-sources-${{ inputs.version }}.tar.gz"
+          mkdir cx && tar -xzf cx.tar.gz -C cx
+          echo "== estrutura"; find cx -maxdepth 2 | sort
+          echo "WINE=$(dirname "$(find cx -maxdepth 4 -path '*/wine/configure' | head -1)")" >> "$GITHUB_ENV"
+
+      - name: Grep
+        env:
+          PATTERN: ${{ inputs.pattern }}
+        run: |
+          cd "$WINE"
+          echo "== arquivos com ocorrências"
+          grep -rlE --include='*.c' --include='*.h' --include='*.in' --include='*.ac' --include='*.inf' --include='*.sh' -- "$PATTERN" . | sort | head -200
+          echo "== ocorrências"
+          grep -rnE --include='*.c' --include='*.h' --include='*.in' --include='*.ac' --include='*.inf' --include='*.sh' -- "$PATTERN" . | cut -c1-300 | head -400
+
+      - name: Arquivos
+        if: inputs.files != ''
+        env:
+          FILES: ${{ inputs.files }}
+        run: |
+          cd "$WINE"
+          for f in $FILES; do echo "======== $f"; cat -n "$f" | head -1500; done
